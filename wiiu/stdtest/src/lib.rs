@@ -1,3 +1,4 @@
+extern crate wiiu_atomics;
 use std::collections::HashMap;
 
 #[no_mangle]
