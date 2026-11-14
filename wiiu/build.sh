@@ -10,5 +10,5 @@ cargo +nightly build --release -Z json-target-spec -Z build-std=core,alloc,compi
   --target "$here/powerpc-nintendo-wiiu.json" "$@"
 # Convert the ELF to an RPX the console / Cemu can load.
 for elf in target/powerpc-nintendo-wiiu/release/*; do
-  [ -f "$elf" ] && [ -x "$elf" ] && case "$elf" in *.d|*.rpx) ;; *) elf2rpl "$elf" "$elf.rpx" ;; esac
+  [ -f "$elf" ] && [ -x "$elf" ] && case "$elf" in *.d|*.rpx) ;; *) powerpc-eabi-objcopy --remove-section .note.GNU-stack "$elf" "$elf.clean" && elf2rpl "$elf.clean" "$elf.rpx" ;; esac
 done
