@@ -87,6 +87,9 @@ thread_local! {
     static TICK: Cell<u64> = const { Cell::new(0) };
 }
 
+/// Fibonacci-hash multiplier at the pointer width (the 64-bit constant, truncated on 32-bit targets).
+const FIB_HASH: usize = (0x9E37_79B9_7F4A_7C15u64 >> (64 - usize::BITS)) as usize;
+
 /// The id of `name`, found by the address of its bytes; `verify` re-checks the text, for strings that can be freed and reused.
 #[inline]
 fn id_of(space: Space, name: &str, verify: bool) -> u16 {
@@ -94,7 +97,7 @@ fn id_of(space: Space, name: &str, verify: bool) -> u16 {
         return 0;
     }
     let (names, key) = (&NAMES[space as usize], name.as_ptr() as usize);
-    let slot = (key >> 3).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> (usize::BITS - 10);
+    let slot = (key >> 3).wrapping_mul(FIB_HASH) >> (usize::BITS - 10);
     let hit = CACHE.with(|c| c[space as usize][slot].get());
     if hit.0 == key && hit.1 != 0 && (!verify || names.name(hit.1) == Some(name)) {
         return hit.1;
