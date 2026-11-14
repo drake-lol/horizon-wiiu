@@ -1,0 +1,2 @@
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends xvfb xauth ffmpeg libopengl0 libgl1 libegl1 libglx-mesa0 libgl1-mesa-dri mesa-vulkan-drivers libvulkan1 libgtk-3-0 libsecret-1-0 libpulse0 libsm6 libxkbcommon-x11-0 libxcb-cursor0 libcurl4 libzstd1 libbz2-1.0 libfuse2t64 fonts-dejavu-core ca-certificates xdotool && rm -rf /var/lib/apt/lists/*

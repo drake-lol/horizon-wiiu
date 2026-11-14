@@ -1,0 +1,4 @@
+FROM devkitpro/devkitppc
+RUN apt-get update && apt-get install -y --no-install-recommends git clang lld ca-certificates curl build-essential && rm -rf /var/lib/apt/lists/*
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:/opt/devkitpro/devkitPPC/bin:/opt/devkitpro/tools/bin:$PATH DEVKITPRO=/opt/devkitpro DEVKITPPC=/opt/devkitpro/devkitPPC
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain nightly -c rust-src
