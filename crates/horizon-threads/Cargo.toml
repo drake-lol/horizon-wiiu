@@ -6,7 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 description = "Scheduling hints for the game's threads and its allocator, and the other OS calls the crates that forbid unsafe code can't make"
 
-[dependencies]
+# mimalloc needs mmap; the Wii U uses `wiiu_alloc` stand-ins instead.
+[target.'cfg(not(target_vendor = "wiiu"))'.dependencies]
 mimalloc = { version = "0.1.52", default-features = false }
 libmimalloc-sys = { version = "0.1.49", default-features = false, features = ["extended"] }
 

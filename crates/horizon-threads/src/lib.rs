@@ -1,6 +1,11 @@
 //! Scheduling hints for the game's threads and its allocator: the few OS calls
 //! that the other crates, which forbid unsafe code, can't make themselves.
 
+#[cfg(target_vendor = "wiiu")]
+mod wiiu_alloc;
+#[cfg(target_vendor = "wiiu")]
+use wiiu_alloc::{libmimalloc_sys, mimalloc};
+
 pub mod alloc_count;
 pub mod allocator_stats;
 /// The game window's boot screen, before wgpu's first frame paints over it.

@@ -1,5 +1,7 @@
 //! The heap the program has in use in mimalloc, from its statistics.
 
+#[cfg(target_vendor = "wiiu")]
+use crate::wiiu_alloc::{libmimalloc_sys, mimalloc};
 /// The number after `"key":` on a line of mimalloc's JSON.
 fn field(line: &str, key: &str) -> Option<usize> {
     let from = line.find(&format!("\"{key}\":"))? + key.len() + 3;

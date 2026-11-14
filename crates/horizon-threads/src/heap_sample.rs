@@ -1,4 +1,6 @@
 //! Sampled heap profiling: mimalloc that records the call stack of about one allocation per `interval` bytes while a session runs.
+#[cfg(target_vendor = "wiiu")]
+use crate::wiiu_alloc::{libmimalloc_sys, mimalloc};
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
 use std::collections::HashMap;

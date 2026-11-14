@@ -10,6 +10,8 @@
 //! Each block costs a header of 16 bytes (its alignment when larger) and an
 //! atomic add: heaptrack's interpreter needed more than 7 GB for the game
 //! (18 GB with line tables), this needs nothing beside it.
+#[cfg(target_vendor = "wiiu")]
+use crate::wiiu_alloc::{libmimalloc_sys, mimalloc};
 use std::{
     alloc::{GlobalAlloc, Layout},
     cell::Cell,

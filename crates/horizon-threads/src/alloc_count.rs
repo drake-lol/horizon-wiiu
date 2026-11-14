@@ -1,4 +1,6 @@
 //! Per-thread allocation counts (feature `alloc-count`); each thread writes only its own slot, so counting needs no atomic read-modify-write.
+#[cfg(target_vendor = "wiiu")]
+use crate::wiiu_alloc::{libmimalloc_sys, mimalloc};
 use std::{
     alloc::{GlobalAlloc, Layout},
     cell::Cell,
