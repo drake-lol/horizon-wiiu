@@ -1,7 +1,6 @@
 # Horizon for Wii U (work in progress)
 
-Experimental port. Status: Rust `std` (heap, `println!`, threads) runs in Cemu; the headless
-`horizon-server` links for the Wii U (it is being brought up in Cemu).
+Experimental port. Status: the real `horizon-server` binary boots in Cemu and prints its CLI usage (`std`: heap, `println!`, threads work).
 
 ## Layout
 - `powerpc-nintendo-wiiu.json`: custom target (32-bit big-endian PowerPC 750, newlib, `os = "vita"` so

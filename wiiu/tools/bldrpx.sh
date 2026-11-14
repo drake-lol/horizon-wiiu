@@ -1,5 +1,6 @@
 #!/bin/sh
 # usage: bldrpx.sh <dir-in-/w> <binary-name>   -> builds with std and writes <binary>.rpx
+export CC_powerpc_nintendo_wiiu=powerpc-eabi-gcc AR_powerpc_nintendo_wiiu=powerpc-eabi-ar
 cd /w/$1
 export RUSTFLAGS="-C link-arg=-L/opt/devkitpro/wut/lib -C link-arg=-specs=/opt/devkitpro/wut/share/wut.specs -C link-arg=-Wl,--start-group -C link-arg=-lwut -C link-arg=-lsysbase -C link-arg=-lm -C link-arg=-lc -C link-arg=-lgcc -C link-arg=-Wl,--end-group -C link-arg=-Wl,--allow-multiple-definition ${EXTRA_RUSTFLAGS:-}"
 cargo +nightly build --release --config "patch.crates-io.libc.path=\"/w/wiiu/vendor/libc\"" -Z json-target-spec -Z build-std=std,panic_abort --target /w/wiiu/powerpc-nintendo-wiiu.json ${CARGO_ARGS:-} 2>&1 | grep -E "^error|Finished" 
