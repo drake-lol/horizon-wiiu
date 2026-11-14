@@ -8,7 +8,7 @@ description = "Host a Horizon server: server.toml, the CLI and the supervisor th
 
 [target.'cfg(target_vendor = "wiiu")'.dependencies]
 # The Espresso has no 64-bit atomics; this supplies the `__atomic_*_8` libcalls.
-wiiu-atomics = { path = "../../wiiu/atomics" }
+wiiu-atomics = { path = "../../wiiu/atomics", features = ["skip-socket-init", "console-stdout"] }
 
 [dependencies]
 # The engine, through the platform's public API (docs/layers.md): server.properties and the user lists, the
