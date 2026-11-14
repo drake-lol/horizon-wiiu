@@ -273,12 +273,16 @@ pub struct Connection {
 fn configure_stream(stream: &TcpStream) -> Result<()> {
     stream.set_nodelay(true)?;
     let sock = socket2::SockRef::from(stream);
-    let keepalive = socket2::TcpKeepalive::new()
-        .with_time(Duration::from_secs(10))
-        .with_interval(Duration::from_secs(3));
-    #[cfg(not(any(target_os = "windows", target_os = "openbsd")))]
-    let keepalive = keepalive.with_retries(3);
-    let _ = sock.set_tcp_keepalive(&keepalive);
+    // Keepalive tuning is best effort; the Wii U's socket stack has none of its knobs.
+    #[cfg(not(target_vendor = "wiiu"))]
+    {
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(Duration::from_secs(10))
+            .with_interval(Duration::from_secs(3));
+        #[cfg(not(any(target_os = "windows", target_os = "openbsd")))]
+        let keepalive = keepalive.with_retries(3);
+        let _ = sock.set_tcp_keepalive(&keepalive);
+    }
     #[cfg(target_os = "linux")]
     {
         let _ = sock.set_quickack(true);
