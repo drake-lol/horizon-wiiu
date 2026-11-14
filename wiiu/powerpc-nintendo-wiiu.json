@@ -1,0 +1,21 @@
+{
+  "arch": "powerpc",
+  "cpu": "750",
+  "data-layout": "E-m:e-p:32:32-Fn32-i64:64-n32",
+  "disable-redzone": true,
+  "env": "newlib",
+  "executables": true,
+  "features": "+msync,-altivec,-vsx",
+  "has-thread-local": false,
+  "linker": "powerpc-eabi-gcc",
+  "linker-flavor": "gcc",
+  "llvm-target": "powerpc-unknown-eabi",
+  "max-atomic-width": 32,
+  "os": "none",
+  "panic-strategy": "abort",
+  "position-independent-executables": false,
+  "relocation-model": "static",
+  "target-endian": "big",
+  "target-pointer-width": 32,
+  "vendor": "nintendo"
+}
