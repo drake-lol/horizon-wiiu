@@ -150,3 +150,162 @@ pub unsafe extern "C" fn __wrap_OSFatal(msg: *const c_char) -> ! {
         __real_OSFatal(msg)
     }
 }
+
+// Link with `-Wl,--wrap=abort` too: report who aborted (the return address, to look up with `nm`).
+#[cfg(feature = "trace-fatal")]
+extern "C" {
+    fn __real_abort() -> !;
+}
+
+#[cfg(feature = "trace-fatal")]
+#[no_mangle]
+#[inline(never)]
+pub unsafe extern "C" fn __wrap_abort() -> ! {
+    let lr: usize;
+    unsafe { core::arch::asm!("mflr {0}", out(reg) lr) };
+    unsafe {
+        OSReport(c"ABORT from %p\n".as_ptr(), lr as *const u8);
+        __real_abort()
+    }
+}
+
+// Link with `-Wl,--wrap=pthread_mutex_lock` to report a failing lock's error code.
+#[cfg(feature = "trace-fatal")]
+extern "C" {
+    fn __real_pthread_mutex_lock(m: *mut u8) -> c_int;
+}
+
+#[cfg(feature = "trace-fatal")]
+#[no_mangle]
+pub unsafe extern "C" fn __wrap_pthread_mutex_lock(m: *mut u8) -> c_int {
+    let rc = unsafe { __real_pthread_mutex_lock(m) };
+    unsafe { OSReport(c"LOCK rc=%d\n".as_ptr(), rc) };
+    rc
+}
+
+// ---- pthread keys: devkitPPC's newlib stubs them out with ENOSYS, but std's thread-locals need them ----
+// Values live in a global table keyed by (OS thread, key), under the same spinlock as the atomics.
+// Destructors are recorded but not run at thread exit (the leak is bounded by the thread count).
+
+use core::cell::UnsafeCell;
+
+extern "C" {
+    fn OSGetCurrentThread() -> *mut u8;
+}
+
+const MAX_KEYS: usize = 256;
+const MAX_ENTRIES: usize = 4096;
+
+struct Keys {
+    used: [bool; MAX_KEYS],
+    dtor: [usize; MAX_KEYS],
+    // (thread pointer, key, value); thread == 0 marks a free slot.
+    entries: [(usize, c_uint, usize); MAX_ENTRIES],
+}
+
+struct KeyTable(UnsafeCell<Keys>);
+unsafe impl Sync for KeyTable {}
+
+static KEYS: KeyTable = KeyTable(UnsafeCell::new(Keys {
+    used: [false; MAX_KEYS],
+    dtor: [0; MAX_KEYS],
+    entries: [(0, 0, 0); MAX_ENTRIES],
+}));
+
+const EAGAIN: c_int = 11;
+const EINVAL: c_int = 22;
+
+#[no_mangle]
+pub unsafe extern "C" fn pthread_key_create(key: *mut c_uint, dtor: usize) -> c_int {
+    with(|| {
+        let t = unsafe { &mut *KEYS.0.get() };
+        for k in 0..MAX_KEYS {
+            if !t.used[k] {
+                t.used[k] = true;
+                t.dtor[k] = dtor;
+                unsafe { key.write(k as c_uint) };
+                return 0;
+            }
+        }
+        EAGAIN
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pthread_key_delete(key: c_uint) -> c_int {
+    with(|| {
+        let t = unsafe { &mut *KEYS.0.get() };
+        let k = key as usize;
+        if k >= MAX_KEYS || !t.used[k] {
+            return EINVAL;
+        }
+        t.used[k] = false;
+        for e in t.entries.iter_mut() {
+            if e.0 != 0 && e.1 == key {
+                e.0 = 0;
+            }
+        }
+        0
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pthread_setspecific(key: c_uint, value: usize) -> c_int {
+    let me = unsafe { OSGetCurrentThread() } as usize;
+    with(|| {
+        let t = unsafe { &mut *KEYS.0.get() };
+        let k = key as usize;
+        if k >= MAX_KEYS || !t.used[k] {
+            return EINVAL;
+        }
+        let mut free = None;
+        for (i, e) in t.entries.iter_mut().enumerate() {
+            if e.0 == me && e.1 == key {
+                e.2 = value;
+                return 0;
+            }
+            if e.0 == 0 && free.is_none() {
+                free = Some(i);
+            }
+        }
+        match free {
+            Some(i) => {
+                t.entries[i] = (me, key, value);
+                0
+            }
+            None => EAGAIN,
+        }
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn pthread_getspecific(key: c_uint) -> usize {
+    let me = unsafe { OSGetCurrentThread() } as usize;
+    with(|| {
+        let t = unsafe { &*KEYS.0.get() };
+        for e in t.entries.iter() {
+            if e.0 == me && e.1 == key {
+                return e.2;
+            }
+        }
+        0
+    })
+}
+
+// ---- stdout/stderr: wut leaves fds 1 and 2 unconnected; send them to the OS console (OSReport) ----
+// Link with `-Wl,--wrap=_write_r` (wiiu/build.sh does). Other fds fall through to newlib.
+#[cfg(feature = "console-stdout")]
+extern "C" {
+    fn OSConsoleWrite(buf: *const c_char, size: c_uint) -> c_int;
+    fn __real__write_r(reent: *mut u8, fd: c_int, buf: *const u8, len: usize) -> isize;
+}
+
+#[cfg(feature = "console-stdout")]
+#[no_mangle]
+pub unsafe extern "C" fn __wrap__write_r(reent: *mut u8, fd: c_int, buf: *const u8, len: usize) -> isize {
+    if fd == 1 || fd == 2 {
+        unsafe { OSConsoleWrite(buf as *const c_char, len as c_uint) };
+        return len as isize;
+    }
+    unsafe { __real__write_r(reent, fd, buf, len) }
+}

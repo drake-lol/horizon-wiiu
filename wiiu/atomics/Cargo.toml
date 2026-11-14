@@ -13,3 +13,5 @@ description = "64-bit atomic libcalls (__atomic_*_8) for the Espresso CPU, which
 skip-socket-init = []
 # Print the message OSFatal gets (via OSReport) instead of stopping silently.
 trace-fatal = []
+# Send fds 1 and 2 to the OS console (needs `-Wl,--wrap=_write_r`).
+console-stdout = []
