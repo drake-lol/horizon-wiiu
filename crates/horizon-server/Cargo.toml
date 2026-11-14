@@ -6,6 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 description = "Host a Horizon server: server.toml, the CLI and the supervisor that runs the game headless (docs/server.md)"
 
+[target.'cfg(target_vendor = "wiiu")'.dependencies]
+# The Espresso has no 64-bit atomics; this supplies the `__atomic_*_8` libcalls.
+wiiu-atomics = { path = "../../wiiu/atomics" }
+
 [dependencies]
 # The engine, through the platform's public API (docs/layers.md): server.properties and the user lists, the
 # version `server/status` reports, and region files for [prune_chunks] (prune.rs), read and rewritten as vanilla's
