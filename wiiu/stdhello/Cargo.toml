@@ -1,0 +1,9 @@
+[package]
+name = "wiiu-stdhello"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+wiiu-atomics = { path = "../atomics", features = ["skip-socket-init", "trace-fatal"] }

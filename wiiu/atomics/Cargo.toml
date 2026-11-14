@@ -7,3 +7,9 @@ description = "64-bit atomic libcalls (__atomic_*_8) for the Espresso CPU, which
 [workspace]
 
 [dependencies]
+
+[features]
+# Cemu lacks nsysnet.set_multicast_state; skip wut's socket init so programs run there.
+skip-socket-init = []
+# Print the message OSFatal gets (via OSReport) instead of stopping silently.
+trace-fatal = []

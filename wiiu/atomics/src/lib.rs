@@ -76,3 +76,77 @@ pub unsafe extern "C" fn __atomic_compare_exchange_8(
 pub extern "C" fn __atomic_is_lock_free(_size: usize, _ptr: *const u8) -> bool {
     false
 }
+
+// ---- libc functions std references that newlib on the Wii U does not provide ----
+// The Wii U has no users, groups, chroot or fifos: the calls fail with ENOSYS.
+
+use core::ffi::{c_char, c_int, c_long, c_uint};
+
+extern "C" {
+    fn __errno() -> *mut c_int;
+}
+
+const ENOSYS: c_int = 88;
+
+unsafe fn fail() -> c_int {
+    unsafe { *__errno() = ENOSYS };
+    -1
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn chown(_path: *const c_char, _owner: c_uint, _group: c_uint) -> c_int {
+    unsafe { fail() }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn lchown(_path: *const c_char, _owner: c_uint, _group: c_uint) -> c_int {
+    unsafe { fail() }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn chroot(_path: *const c_char) -> c_int {
+    unsafe { fail() }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn mkfifo(_path: *const c_char, _mode: c_uint) -> c_int {
+    unsafe { fail() }
+}
+
+/// newlib's `_SC_*` numbers: `_SC_PAGESIZE` 8, `_SC_NPROCESSORS_CONF` 57 and `_SC_NPROCESSORS_ONLN` 58.
+/// The Espresso has three cores and the console's pages are 4 KiB.
+#[no_mangle]
+pub unsafe extern "C" fn sysconf(name: c_int) -> c_long {
+    match name {
+        8 => 4096,
+        57 | 58 => 3,
+        _ => unsafe { fail() as c_long },
+    }
+}
+
+// ---- Cemu has no nsysnet.set_multicast_state, which wut's socket init calls: skip that init ----
+// (Enable the `socket-init` behaviour again for real hardware by removing these two.)
+#[cfg(feature = "skip-socket-init")]
+#[no_mangle]
+pub extern "C" fn __init_wut_socket() {}
+
+#[cfg(feature = "skip-socket-init")]
+#[no_mangle]
+pub extern "C" fn __fini_wut_socket() {}
+
+// ---- debugging aid: show the message of a fatal error before the console stops ----
+// Link with `-Wl,--wrap=OSFatal` (wiiu/build.sh does, with the `trace-fatal` feature).
+#[cfg(feature = "trace-fatal")]
+extern "C" {
+    fn OSReport(fmt: *const c_char, ...);
+    fn __real_OSFatal(msg: *const c_char) -> !;
+}
+
+#[cfg(feature = "trace-fatal")]
+#[no_mangle]
+pub unsafe extern "C" fn __wrap_OSFatal(msg: *const c_char) -> ! {
+    unsafe {
+        OSReport(c"FATAL: %s\n".as_ptr(), msg);
+        __real_OSFatal(msg)
+    }
+}
