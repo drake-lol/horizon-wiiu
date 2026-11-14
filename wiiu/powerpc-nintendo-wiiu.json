@@ -6,20 +6,20 @@
   "dynamic-linking": false,
   "env": "newlib",
   "executables": true,
-  "target-family": [
-    "unix"
-  ],
   "features": "+msync,-altivec,-vsx",
   "has-thread-local": false,
   "linker": "powerpc-eabi-gcc",
   "linker-flavor": "gcc",
   "llvm-target": "powerpc-unknown-eabi",
-  "max-atomic-width": 32,
+  "max-atomic-width": 64,
   "os": "vita",
   "panic-strategy": "abort",
   "position-independent-executables": false,
   "relocation-model": "static",
   "target-endian": "big",
+  "target-family": [
+    "unix"
+  ],
   "target-pointer-width": 32,
   "vendor": "wiiu"
 }

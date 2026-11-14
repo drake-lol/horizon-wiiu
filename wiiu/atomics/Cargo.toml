@@ -1,0 +1,9 @@
+[package]
+name = "wiiu-atomics"
+version = "0.1.0"
+edition = "2021"
+description = "64-bit atomic libcalls (__atomic_*_8) for the Espresso CPU, which has no native 64-bit atomics"
+
+[workspace]
+
+[dependencies]
