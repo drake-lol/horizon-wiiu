@@ -125,7 +125,7 @@ pub fn header_line(status: &Value) -> String {
 }
 
 /// The terminal's height, for the scroll region under the header.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_vendor = "wiiu")))]
 fn terminal_rows() -> Option<u16> {
     // SAFETY: TIOCGWINSZ fills a winsize, which is zeroed plain data.
     let mut size: libc::winsize = unsafe { std::mem::zeroed() };
@@ -133,7 +133,7 @@ fn terminal_rows() -> Option<u16> {
     (ok && size.ws_row > 2).then_some(size.ws_row)
 }
 
-#[cfg(not(unix))]
+#[cfg(any(not(unix), target_vendor = "wiiu"))]
 fn terminal_rows() -> Option<u16> {
     None
 }
