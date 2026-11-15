@@ -105,7 +105,6 @@ pub unsafe extern "C" fn lchown(_path: *const c_char, _owner: c_uint, _group: c_
 
 extern "C" {
     fn __real_ftruncate(fd: c_int, len: i64) -> c_int;
-    fn lseek(fd: c_int, offset: i64, whence: c_int) -> i64;
 }
 
 /// Linked with `--wrap=ftruncate` (wiiu/tools/bldrpx.sh). Cemu never answers wut's FSA truncate, so a
