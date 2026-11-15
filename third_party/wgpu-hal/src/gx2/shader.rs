@@ -161,3 +161,13 @@ pub fn compile(
     let index = naga_latte::entry_point_index(&module, stage, entry).ok_or_else(|| format!("no entry point {entry}"))?;
     naga_latte::compile(&module, &info, index, opts).map_err(|e| format!("{entry}: {e}"))
 }
+
+/// A pixel shader painting magenta, for the `solid` debug switch.
+pub fn solid_pixel() -> Result<naga_latte::Shader, String> {
+    let src = "@fragment fn main() -> @location(0) vec4<f32> { return vec4<f32>(1.0, 0.0, 1.0, 1.0); }";
+    let module = naga::front::wgsl::parse_str(src).map_err(|e| format!("{e:?}"))?;
+    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+        .validate(&module)
+        .map_err(|e| format!("{e:?}"))?;
+    compile(&module, &info, naga::ShaderStage::Fragment, "main", &Default::default(), &naga_latte::Options::default())
+}

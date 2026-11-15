@@ -48,13 +48,15 @@ macro_rules! trace {
 pub(crate) use trace;
 
 /// Switches for chasing rendering bugs on the console, read once from `horizon/gx2debug.txt` on the SD card
-/// (words: `nodepth` depth test off, `nocull` no face culling, `noblend` blending off, `drawlog=<frame>` log
+/// (words: `nodepth` depth test off, `nocull` no face culling, `noblend` blending off, `solid` every pixel shader
+/// replaced by one painting magenta (geometry vs shading), `drawlog=<frame>` log
 /// every pass and draw of that frame and the next).
 #[derive(Default, Debug)]
 pub(crate) struct DebugFlags {
     pub nodepth: bool,
     pub nocull: bool,
     pub noblend: bool,
+    pub solid: bool,
     pub drawlog: Option<u32>,
 }
 
@@ -68,6 +70,7 @@ pub(crate) fn debug_flags() -> &'static DebugFlags {
                     "nodepth" => f.nodepth = true,
                     "nocull" => f.nocull = true,
                     "noblend" => f.noblend = true,
+                    "solid" => f.solid = true,
                     _ => {
                         if let Some(n) = w.strip_prefix("drawlog=") {
                             f.drawlog = n.parse().ok();
@@ -1082,6 +1085,7 @@ impl crate::Device for Device {
         )
         .map_err(err(wgt::ShaderStages::VERTEX))?;
         let ps = match &desc.fragment_stage {
+            Some(_) if debug_flags().solid => Some(shader::solid_pixel().map_err(err(wgt::ShaderStages::FRAGMENT))?),
             Some(fs) => Some(
                 shader::compile(
                     &fs.module.module,

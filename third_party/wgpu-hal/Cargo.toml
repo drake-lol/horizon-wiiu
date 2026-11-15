@@ -260,6 +260,11 @@ version = "0.2.2"
 [target.'cfg(target_vendor = "wiiu")'.dependencies.wut-sys]
 path = "../../wiiu/wut-sys"
 
+[target.'cfg(target_vendor = "wiiu")'.dependencies.naga]
+version = "30.0.0"
+# the GX2 backend's `solid` debug switch compiles a stand-in pixel shader from WGSL
+features = ["wgsl-in"]
+
 [target.'cfg(target_vendor = "wiiu")'.dependencies.naga-latte]
 path = "../../wiiu/naga-latte"
 
