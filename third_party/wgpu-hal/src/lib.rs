@@ -243,7 +243,7 @@ extern crate alloc;
 extern crate naga_types as nt;
 extern crate wgpu_types as wgt;
 // Each of these backends needs `std` in some fashion; usually `std::thread` functions.
-#[cfg(any(dx12, gles_with_std, metal, vulkan))]
+#[cfg(any(dx12, gles_with_std, metal, vulkan, target_vendor = "wiiu"))]
 #[macro_use]
 extern crate std;
 
@@ -259,6 +259,9 @@ pub mod metal;
 /// A dummy API implementation.
 // TODO(https://github.com/gfx-rs/wgpu/issues/7120): this should have a cfg
 pub mod noop;
+/// Horizon: the Wii U's GX2 backend, in the `Noop` slot there (see the module's docs).
+#[cfg(target_vendor = "wiiu")]
+pub mod gx2;
 /// Vulkan API internals.
 #[cfg(vulkan)]
 pub mod vulkan;
@@ -271,7 +274,10 @@ pub mod api {
     pub use super::gles::Api as Gles;
     #[cfg(metal)]
     pub use super::metal::Api as Metal;
+    #[cfg(not(target_vendor = "wiiu"))]
     pub use super::noop::Api as Noop;
+    #[cfg(target_vendor = "wiiu")]
+    pub use super::gx2::Api as Noop;
     #[cfg(vulkan)]
     pub use super::vulkan::Api as Vulkan;
 }

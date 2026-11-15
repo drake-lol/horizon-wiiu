@@ -1995,6 +1995,10 @@ fn backend_order(
     wgpu_backend: bool,
 ) -> Vec<wgpu::Backends> {
     use wgpu::Backends;
+    // The Wii U has one GPU API, GX2, which wgpu-hal serves in its `Noop` slot (third_party/wgpu-hal/src/gx2).
+    if cfg!(target_vendor = "wiiu") {
+        return vec![Backends::NOOP];
+    }
     if os == "macos" || wgpu_backend {
         return vec![Backends::default()];
     }
@@ -2015,6 +2019,7 @@ fn backends_name(backends: wgpu::Backends) -> &'static str {
         wgpu::Backends::VULKAN => "Vulkan",
         wgpu::Backends::DX12 => "DirectX 12",
         wgpu::Backends::GL => "OpenGL",
+        wgpu::Backends::NOOP if cfg!(target_vendor = "wiiu") => "GX2",
         _ => "graphics",
     }
 }

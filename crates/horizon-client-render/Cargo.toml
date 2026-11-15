@@ -64,6 +64,10 @@ zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 [target.'cfg(all(unix, not(target_vendor = "wiiu")))'.dependencies]
 rustix = { version = "1", default-features = false, features = ["std", "time"] }
 
+# The Wii U's GX2 backend sits in wgpu-hal's `Noop` slot (third_party/wgpu-hal/src/gx2).
+[target.'cfg(target_vendor = "wiiu")'.dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["noop"] }
+
 [target.'cfg(windows)'.dependencies]
 wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
 
