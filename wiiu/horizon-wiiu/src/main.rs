@@ -249,6 +249,7 @@ fn main() {
     let spawn = [sx as f32 + 0.5, world.surface(sx, sz) as f32 + 2.0, sz as f32 + 0.5];
     let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0, origin: [0; 3], spawned: net.is_none(), pending: Vec::new() };
     let mut manual = false;
+    let mut last_move = std::time::Instant::now();
     let mut broke = 0u32;
     let mut placed = 0u32;
 
@@ -295,7 +296,10 @@ fn main() {
         if game.spawned {
             game.player.update(&game.world, &input);
         }
-        if let (Some(n), true) = (&net, game.spawned && game.frame % 3 == 0) {
+        // The server allows one position packet per 50 ms tick and kicks for two ("Invalid move player packet"),
+        // so send by the clock, not by frame count: Cemu delivers frames in bursts.
+        if let (Some(n), true) = (&net, game.spawned && last_move.elapsed() >= std::time::Duration::from_millis(55)) {
+            last_move = std::time::Instant::now();
             let p = &game.player;
             n.move_to([p.pos[0] as f64 + game.origin[0] as f64, p.pos[1] as f64 + game.origin[1] as f64, p.pos[2] as f64 + game.origin[2] as f64], p.on_ground);
         }
