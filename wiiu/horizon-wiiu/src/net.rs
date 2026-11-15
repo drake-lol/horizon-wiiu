@@ -7,6 +7,7 @@
 //! (`wiiu/mkstates` makes it from the player's own prepared data).
 
 use horizon_protocol::{
+    chunk::{SectionLight, nibble},
     PROTOCOL_VERSION,
     buf::{Reader, Writer},
     chunk::Section,
@@ -69,7 +70,7 @@ pub enum Event {
     /// The first position the server put the player at.
     Spawn([f64; 3]),
     /// A chunk column: block ids per 16-high section from the lowest one (`4096` bytes each, y-major).
-    Chunk { x: i32, z: i32, min_y: i32, sections: Vec<Vec<u16>> },
+    Chunk { x: i32, z: i32, min_y: i32, sections: Vec<Vec<u16>>, light: Vec<Vec<u8>> },
     Block { pos: [i32; 3], block: u16 },
     Closed(String),
 }
@@ -307,7 +308,10 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
                             chunks += 1;
                             LAST_CHUNK_MS.store(now_ms(), Ordering::SeqCst);
                             let sections = secs.iter().map(|s| section_blocks(s, &states)).collect();
-                            let _ = tx.send(Event::Chunk { x: p.x, z: p.z, min_y: dimension.min_y, sections });
+                            // light sections start one below the lowest block section
+                            let layers = p.light.layers(dimension.sections() + 2);
+                            let light = (0..dimension.sections()).map(|si| section_light(layers.get(si + 1))).collect();
+                            let _ = tx.send(Event::Chunk { x: p.x, z: p.z, min_y: dimension.min_y, sections, light });
                         }
                         Err(e) => println!("net: chunk {},{} did not decode: {e}", p.x, p.z),
                     }
@@ -342,6 +346,19 @@ fn section_blocks(s: &Section, states: &[u16]) -> Vec<u16> {
     for (i, slot) in out.iter_mut().enumerate() {
         let state = s.states.get(i);
         *slot = states.get(state as usize).copied().unwrap_or(1);
+    }
+    out
+}
+
+/// The light a block gets: the brighter of sky and block light, 0..15. A layer the server left out is full sky
+/// light (above the terrain) and no block light.
+fn section_light(layers: Option<&SectionLight>) -> Vec<u8> {
+    let mut out = vec![15u8; 4096];
+    let Some((sky, block)) = layers else { return out };
+    for (i, slot) in out.iter_mut().enumerate() {
+        let s = sky.as_ref().map_or(15, |l| nibble(l, i));
+        let b = block.as_ref().map_or(0, |l| nibble(l, i));
+        *slot = s.max(b);
     }
     out
 }

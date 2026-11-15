@@ -91,6 +91,8 @@ pub struct Vertex {
 
 pub struct World {
     blocks: Vec<u16>,
+    /// Light per cell, 0..15 (sky or block light, whichever is brighter); 15 where the server sent none.
+    light: Vec<u8>,
     pub types: Types,
     pub sx: usize,
     pub sy: usize,
@@ -107,6 +109,12 @@ fn hash(x: i32, z: i32, seed: u32) -> f32 {
     h = h.wrapping_mul(0xc2b2_ae35);
     h ^= h >> 16;
     (h & 0xff_ffff) as f32 / 0x100_0000 as f32
+}
+
+/// LightTexture's curve for a dimension with no ambient light: level 15 is full, 0 is near black.
+fn brightness(level: u8) -> f32 {
+    let f = level.min(15) as f32 / 15.0;
+    (f / (4.0 - 3.0 * f)).max(0.06)
 }
 
 fn smooth(t: f32) -> f32 {
@@ -143,7 +151,7 @@ fn height_at(x: usize, z: usize) -> usize {
 
 impl World {
     pub fn empty(sx: usize, sy: usize, sz: usize, y0: i32, types: Types) -> World {
-        World { blocks: vec![0u16; sx * sy * sz], types, sx, sy, sz, y0 }
+        World { blocks: vec![0u16; sx * sy * sz], light: vec![15u8; sx * sy * sz], types, sx, sy, sz, y0 }
     }
 
     /// Store block type `b` (an index into `types`).
@@ -199,7 +207,7 @@ impl World {
                 }
             }
         }
-        World { blocks: blocks.iter().map(|b| *b as u16).collect(), types, sx: SIZE_X, sy: SIZE_Y, sz: SIZE_Z, y0: 0 }
+        World { blocks: blocks.iter().map(|b| *b as u16).collect(), light: vec![15u8; SIZE_X * SIZE_Y * SIZE_Z], types, sx: SIZE_X, sy: SIZE_Y, sz: SIZE_Z, y0: 0 }
     }
 
     #[inline(never)]
@@ -211,6 +219,21 @@ impl World {
         // hung in the first meshed layer (see wiiu/README.md, "Known gaps").
         let i = (y as usize * self.sz + z as usize) * self.sx + x as usize;
         self.blocks.get(i).copied().unwrap_or(0)
+    }
+
+    pub fn set_light(&mut self, x: usize, y: usize, z: usize, l: u8) {
+        let i = (y * self.sz + z) * self.sx + x;
+        if let Some(slot) = self.light.get_mut(i) {
+            *slot = l;
+        }
+    }
+
+    pub fn light_at(&self, x: i32, y: i32, z: i32) -> u8 {
+        if x < 0 || z < 0 || y < 0 || x >= self.sx as i32 || z >= self.sz as i32 || y >= self.sy as i32 {
+            return 15;
+        }
+        let i = (y as usize * self.sz + z as usize) * self.sx + x as usize;
+        self.light.get(i).copied().unwrap_or(15)
     }
 
     /// A block the player cannot walk through: a full cube that is not a liquid.
@@ -249,7 +272,7 @@ impl World {
                     let liquid = info.flags & LIQUID != 0;
                     let tint = 0.94 + 0.12 * hash(x * 31 + y, z, 5);
                     if info.flags & CROSS != 0 {
-                        let k = 0.9 * tint;
+                        let k = 0.9 * tint * brightness(self.light_at(x, y, z));
                         let rgb = if info.flags & TINT_GRASS != 0 { [k * 0.57, k * 0.74, k * 0.35] } else { [k, k, k] };
                         let color = [(rgb[0] * 255.0) as u8, (rgb[1] * 255.0) as u8, (rgb[2] * 255.0) as u8, 255];
                         let (u0, v0, su, sv) = atlas::uv_rect(info.side as usize);
@@ -274,7 +297,8 @@ impl World {
                             continue;
                         }
                         let tile = if n[1] == 1 { info.top } else if n[1] == -1 { info.bottom } else { info.side } as usize;
-                        let k = shade * tint;
+                        // the face is lit by the cell it looks into
+                        let k = shade * tint * brightness(self.light_at(x + n[0], y + n[1], z + n[2]));
                         let mut rgb = [k, k, k];
                         let tinted: Option<[f32; 3]> = if info.flags & TINT_WATER != 0 {
                             Some([0.25, 0.46, 0.89])

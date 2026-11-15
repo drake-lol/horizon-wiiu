@@ -109,7 +109,7 @@ impl Game {
     }
 
     /// Put a received chunk column into the window and queue its meshes.
-    fn apply_chunk(&mut self, x: i32, z: i32, min_y: i32, sections: &[Vec<u16>]) {
+    fn apply_chunk(&mut self, x: i32, z: i32, min_y: i32, sections: &[Vec<u16>], light: &[Vec<u8>]) {
         let (cx, cz) = (x - self.origin[0].div_euclid(16), z - self.origin[2].div_euclid(16));
         let (nx, nz) = (self.world.sx as i32 / 16, self.world.sz as i32 / 16);
         if cx < 0 || cz < 0 || cx >= nx || cz >= nz {
@@ -121,10 +121,13 @@ impl Game {
             if base + 16 <= 0 || base >= sy {
                 continue;
             }
+            let lights = light.get(si);
             for (i, &b) in sec.iter().enumerate() {
                 let wy = base + ((i >> 8) & 15) as i32;
                 if wy >= 0 && wy < sy {
-                    self.world.set((cx * 16) as usize + (i & 15), wy as usize, (cz * 16) as usize + ((i >> 4) & 15), b);
+                    let (lx, lz) = ((cx * 16) as usize + (i & 15), (cz * 16) as usize + ((i >> 4) & 15));
+                    self.world.set(lx, wy as usize, lz, b);
+                    self.world.set_light(lx, wy as usize, lz, lights.map_or(15, |l| l[i]));
                 }
             }
         }
@@ -156,11 +159,11 @@ impl Game {
                     }
                 }
             }
-            net::Event::Chunk { x, z, min_y, sections } => {
+            net::Event::Chunk { x, z, min_y, sections, light } => {
                 if self.spawned {
-                    self.apply_chunk(x, z, min_y, &sections);
+                    self.apply_chunk(x, z, min_y, &sections, &light);
                 } else {
-                    self.pending.push(net::Event::Chunk { x, z, min_y, sections });
+                    self.pending.push(net::Event::Chunk { x, z, min_y, sections, light });
                 }
             }
             net::Event::Block { pos, block } => {
