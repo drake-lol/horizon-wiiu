@@ -81,3 +81,26 @@ const _: () = {
 open(v, "w").write(t)
 print("patched stat", v)
 
+# --- types: libc takes the Vita's 32-bit time_t/off_t and 16-bit dev_t/ino_t for os = "vita". devkitPPC's newlib
+# has 64-bit time_t and off_t (lseek, ftruncate, stat, timespec) and 32-bit dev_t/ino_t.
+m = f"{root}/src/unix/newlib/mod.rs"
+t = open(m).read()
+old = """    if #[cfg(any(target_os = "espidf", target_os = "vita"))] {
+        pub type dev_t = c_short;"""
+assert old in t, "dev_t block"
+t = t.replace(old, """    if #[cfg(target_vendor = "wiiu")] {
+        pub type dev_t = u32;
+        pub type ino_t = u32;
+        pub type off_t = i64;
+    } else if #[cfg(any(target_os = "espidf", target_os = "vita"))] {
+        pub type dev_t = c_short;""", 1)
+old = """        target_os = "vita"
+    ))] {
+        pub type time_t = c_long;"""
+assert old in t, "time_t block"
+t = t.replace(old, """        all(target_os = "vita", not(target_vendor = "wiiu"))
+    ))] {
+        pub type time_t = c_long;""", 1)
+open(m, "w").write(t)
+print("patched types", m)
+
