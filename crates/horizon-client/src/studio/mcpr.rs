@@ -224,7 +224,7 @@ impl McprWriter {
         // A writer holds its stream locked until the file closes, which the
         // operating system does even after a crash. Recovery uses that to tell
         // a leftover from a recording still being written.
-        if let Err(e) = file.try_lock() {
+        if let Err(e) = horizon_threads::file_lock::try_lock(&file) {
             // Filesystems without locks still record; recovery falls back to the
             // pid in the stream's name there.
             log::warn!("Studio: recording stream cannot be locked: {e}");
@@ -1033,7 +1033,7 @@ fn stream_is_unlocked(stream: &Path) -> bool {
     let Ok(file) = OpenOptions::new().read(true).write(true).open(stream) else {
         return false;
     };
-    file.try_lock().is_ok()
+    horizon_threads::file_lock::try_lock(&file).is_ok()
 }
 
 /// Cut a leftover stream to its last whole frame, as [`frame_at`] defines one,

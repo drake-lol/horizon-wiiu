@@ -326,7 +326,7 @@ pub(super) fn hold(out: &Path) -> io::Result<()> {
                 .create(true)
                 .truncate(false)
                 .open(use_path(out))?;
-            file.lock_shared()?;
+            horizon_threads::file_lock::lock_shared(&file)?;
             held.push((out.into(), file));
             held.len() - 1
         }
@@ -385,7 +385,7 @@ fn remove_unused(out: &Path) -> io::Result<()> {
     let building = open(lock_path(out))?;
     let using = open(use_path(out))?;
     for lock in [&building, &using] {
-        match lock.try_lock() {
+        match horizon_threads::file_lock::try_lock(lock) {
             Ok(()) => {}
             Err(fs::TryLockError::WouldBlock) => return Ok(()),
             Err(fs::TryLockError::Error(e)) => return Err(e),
@@ -411,7 +411,7 @@ pub(super) fn build(vanilla: &Path, packs: &[Pack], out: &Path) -> io::Result<()
         .create(true)
         .truncate(false)
         .open(lock_path(out))?;
-    lock.lock()?;
+    horizon_threads::file_lock::lock(&lock)?;
     let vanilla_key = absolute(vanilla)?;
     let marker_path = marker_path(out);
     let signature = pack_signature(packs);

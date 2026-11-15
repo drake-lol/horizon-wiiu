@@ -154,7 +154,7 @@ impl Drop for SessionLock {
     /// alone keeps the lock while any copy of the descriptor lives on, such as
     /// the one a process spawned on another thread holds until its `exec`.
     fn drop(&mut self) {
-        let _ = self.0.unlock();
+        let _ = horizon_threads::file_lock::unlock(&self.0);
     }
 }
 impl SessionLock {
@@ -166,7 +166,7 @@ impl SessionLock {
             .create(true)
             .truncate(false)
             .open(world.join("session.lock"))?;
-        file.try_lock()
+        horizon_threads::file_lock::try_lock(&file)
             .map_err(|_| format!("{} is already open in another instance", world.display()))?;
         file.set_len(0)?;
         file.write_all(&[0x26, 0x03])?;
@@ -184,12 +184,12 @@ impl SessionLock {
             Ok(file) => file,
             Err(e) => return e.kind() == std::io::ErrorKind::PermissionDenied,
         };
-        match file.try_lock() {
+        match horizon_threads::file_lock::try_lock(&file) {
             Err(fs::TryLockError::WouldBlock) => true,
             Err(_) => false,
             // Take the probe's own lock back at once, as `SessionLock` does on drop.
             Ok(()) => {
-                let _ = file.unlock();
+                let _ = horizon_threads::file_lock::unlock(&file);
                 false
             }
         }
