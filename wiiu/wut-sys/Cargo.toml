@@ -1,0 +1,9 @@
+[package]
+name = "wut-sys"
+version = "0.1.0"
+edition = "2021"
+description = "Raw bindings to wut (coreinit, GX2, WHB, VPAD, KPAD, ProcUI), generated with bindgen from devkitPro's headers (wiiu/wut-sys/gen.sh)"
+
+[workspace]
+
+[dependencies]
