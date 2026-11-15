@@ -1,6 +1,7 @@
 # Horizon for Wii U (work in progress)
 
-Experimental port. Status: the real `horizon-server` binary boots in Cemu and prints its CLI usage (`std`: heap, `println!`, threads work).
+Experimental port. Status: the real `horizon-server` binary boots in Cemu and prints its CLI usage (`std`: heap, `println!`, threads work);
+Rust drives the GPU through GX2 (`gxtest/`: a vertex-coloured triangle renders in Cemu).
 
 ## Layout
 - `powerpc-nintendo-wiiu.json`: custom target (32-bit big-endian PowerPC 750, newlib, `os = "vita"` so
@@ -11,6 +12,8 @@ Experimental port. Status: the real `horizon-server` binary boots in Cemu and pr
   `chown`/`chroot`/`mkfifo` stubs, stdout/stderr to the OS console, and debug tracing of `abort`/`OSFatal`.
 - `patches/patch_libc.py`, `vendor_libc.sh`: patch the `libc` crate's unverified newlib pthread sizes
   to devkitPPC's (mutex is 12 bytes, zero-initialised).
+- `wut-sys/`: bindgen bindings to wut (coreinit, GX2, GX2R, WHB, VPAD, KPAD, ProcUI); regenerate with `wut-sys/gen.sh` in the toolchain image.
+- `gxtest/`: GX2 triangle using `pos_col_shader.gsh` from devkitPro/wiiu-examples (ISC/zlib-style licence).
 - `hello/` (`no_std` + wut), `stdhello/` (std + threads), `stdtest/`: test programs.
 - `tools/`: Dockerfiles for the toolchain and for Cemu, and the headless Cemu runner.
 
@@ -33,6 +36,8 @@ Program output appears as `[OSConsole]` lines in `out/home/.local/share/Cemu/log
 Cemu lacks `nsysnet.set_multicast_state`, so test builds use the `skip-socket-init` feature of `wiiu-atomics`.
 
 ## Known gaps
+- Shaders: there is no GLSL/WGSL to GX2 (Latte) compiler on Linux. Precompiled `.gsh` files work; the game's shaders
+  need a build-time path (hand-written Latte assembly, or porting an assembler such as latte-assembler).
 - The client (`horizon-client*`) pulls in winit, wgpu, arboard, fs4 (rustix) and others that need a Wii U
   window/input/GX2 layer; this is the main remaining work.
 - Thread-exit destructors for pthread keys are not run; no real TLS (`has-thread-local` is false).
