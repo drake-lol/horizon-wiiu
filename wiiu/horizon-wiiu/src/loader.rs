@@ -87,6 +87,7 @@ pub fn load() -> Option<World> {
     let dirs = [std::env::var("HORIZON_WORLD").ok(), Some("/vol/external01/horizon/world/region".to_string())];
     for dir in dirs.into_iter().flatten() {
         let files = region_files(&dir);
+        println!("loader: {dir}: {} region file(s) ({:?})", files.len(), std::fs::read_dir(&dir).map(|_| "ok").map_err(|e| e.to_string()));
         if let Some((rx, rz, path)) = files.first() {
             println!("loader: reading {path}");
             return load_region(path, *rx, *rz);
