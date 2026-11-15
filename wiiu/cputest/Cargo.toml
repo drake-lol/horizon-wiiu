@@ -1,0 +1,16 @@
+[package]
+name = "cputest"
+version = "0.1.0"
+edition = "2021"
+description = "CPU self-test: the same computations on the host and in Cemu, to find instructions the emulator (or LLVM's PowerPC code) gets wrong"
+
+[workspace]
+
+[target.'cfg(target_vendor = "wiiu")'.dependencies]
+wut-sys = { path = "../wut-sys" }
+wiiu-atomics = { path = "../atomics", features = ["console-stdout", "trace-fatal"] }
+
+[profile.release]
+opt-level = 1
+panic = "abort"
+debug = false
