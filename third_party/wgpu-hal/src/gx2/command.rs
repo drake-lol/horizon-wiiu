@@ -140,7 +140,7 @@ impl State {
                 Cmd::BufferToTexture { src, dst, regions } => {
                     shared.sync();
                     if !dst.linear {
-                        log::warn!("GX2: upload to a render target texture skipped");
+                        std::println!("GX2: upload to a render target texture skipped");
                         return;
                     }
                     for r in regions {
@@ -165,7 +165,7 @@ impl State {
                 Cmd::TextureToBuffer { src, dst, regions } => {
                     shared.sync();
                     if !src.linear {
-                        log::warn!("GX2: reading back a render target texture is not supported yet");
+                        std::println!("GX2: reading back a render target texture is not supported yet");
                         return;
                     }
                     for r in regions {
@@ -577,7 +577,7 @@ impl crate::CommandEncoder for CommandBuffer {
     }
 
     unsafe fn set_immediates(&mut self, _layout: &PipelineLayout, _offset_bytes: u32, _data: &[u32]) {
-        log::warn!("GX2: immediates are not supported");
+        std::println!("GX2: immediates are not supported");
     }
 
     unsafe fn insert_debug_marker(&mut self, _label: &str) {}

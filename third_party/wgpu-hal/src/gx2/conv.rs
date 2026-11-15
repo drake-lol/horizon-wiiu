@@ -154,7 +154,7 @@ pub fn attrib_format(f: wgt::VertexFormat) -> (GX2AttribFormat, u32) {
         V::Sint32x4 => (GX2AttribFormat_GX2_ATTRIB_TYPE_32_32_32_32, int | signed, 4),
         V::Unorm10_10_10_2 => (GX2AttribFormat_GX2_ATTRIB_TYPE_10_10_10_2, 0, 4),
         other => {
-            log::warn!("GX2: vertex format {other:?} read as 32-bit float");
+            std::println!("GX2: vertex format {other:?} read as 32-bit float");
             (GX2AttribFormat_GX2_ATTRIB_TYPE_32_FLOAT, scaled, 1)
         }
     };

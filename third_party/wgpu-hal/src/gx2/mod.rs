@@ -773,7 +773,7 @@ impl crate::Device for Device {
     unsafe fn create_texture(&self, desc: &crate::TextureDescriptor) -> DeviceResult<Texture> {
         let (format, bpe) = conv::surface_format(desc.format).ok_or(crate::DeviceError::Unexpected)?;
         if desc.mip_level_count > 1 && !WARNED_MIPS.swap(true, Ordering::Relaxed) {
-            log::warn!("GX2: mipmaps not supported yet; textures keep level 0");
+            std::println!("GX2: mipmaps not supported yet; textures keep level 0");
         }
         let target = desc.usage.intersects(
             wgt::TextureUses::COLOR_TARGET
