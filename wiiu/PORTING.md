@@ -102,3 +102,21 @@ host. This is the cause of the "miscompiles" noted earlier in this port (opt-lev
 the move gate) and of wgpu-core's corrupted command-buffer list: it is the emulator, not LLVM or the port.
 So: test in Cemu with `--force-interpreter` (`wiiu/tools/runcemu.sh` passes it), slower but faithful; real
 hardware runs the code as compiled. The remaining f64 difference is Cemu's fused multiply-add rounding.
+
+## Status: the real client on the Wii U (Cemu, interpreter)
+
+`wiiu/horizon-real` is the real `horizon-client` (gameplay and the real renderer) as a Wii U program, 42 MB.
+Its command line is `horizon/args.txt` on the SD card; the prepared 26.3 resources go in `horizon/res`.
+In Cemu (`--force-interpreter`, log flag 131072 for the console) it:
+- compiles the renderer's 63 shader modules and their pipelines on the console (naga-latte) and presents frames;
+- loads every resource (35,723 block states, 1,658 items, 67 biomes) in about 6-8 minutes of interpreter time;
+- **joins a real Horizon server** (`WiiU joined the game` in the server's log) and renders the world's sky.
+
+Platform fixes it took (all `target_vendor = "wiiu"` only): launch arguments from the SD card; file locks
+granted (std has none there); `ftruncate` that changes nothing kept from FSA (Cemu never answers it);
+threads start with no stale thread-specific values (`--wrap=pthread_create`); `setsockopt` accepted and
+ignored (Cemu traps on options); a socket shared by a connection's reader and writer (no `dup` for sockets);
+no `current_exe`. Link flags: `wiiu/tools/bldrpx.sh`.
+
+Next: terrain and the HUD draw but show nothing yet (formats, storage-buffer fetches or depth to check against
+the renderer's passes), mipmaps, and speed (Cemu's recompiler, or real hardware).
