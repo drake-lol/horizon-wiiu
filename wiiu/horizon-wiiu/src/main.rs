@@ -434,7 +434,12 @@ fn main() {
         // plain ifs: a tuple pattern `(Some(n), true)` here never matched on this target, though both were true
         let due = ms_since(last_move) >= 100;
         if game.frame % 120 == 60 {
-            println!("gate: spawned={} moving={} due={} net={}", game.spawned, moving, due, net.is_some());
+            let a = loaded_at.is_some();
+            let b = loaded_at.map(ms_since);
+            let c = b.map(|v| v >= 1000);
+            let d = net::chunks_quiet(2000);
+            let e = loaded_at.is_some_and(|t| ms_since(t) >= 1000);
+            println!("gate: spawned={} moving={} due={} net={} | a={a} b={b:?} c={c:?} d={d} e={e}", game.spawned, moving, due, net.is_some());
         }
         if game.spawned && moving && due {
             if game.frame % 120 == 60 {
