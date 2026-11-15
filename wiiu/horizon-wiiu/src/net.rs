@@ -1,0 +1,303 @@
+//! The real Horizon / Minecraft Java 26.3 network protocol (`horizon-protocol`): join a server offline, finish
+//! configuration, then keep the connection alive and turn the chunks it sends into blocks.
+//!
+//! The socket is used through `&TcpStream` from two threads (no `try_clone`: Wii U sockets are not duplicable file
+//! descriptors) and no socket options are set (Cemu's nsysnet crashes in `setsockopt`). A numeric address is used;
+//! `server.txt` on the SD card names it. Block state ids become the viewer's `Block` through `states.bin`
+//! (`wiiu/mkstates` makes it from the player's own prepared data).
+
+use horizon_protocol::{
+    PROTOCOL_VERSION,
+    buf::{Reader, Writer},
+    chunk::Section,
+    crypto::offline_uuid,
+    frame, ids,
+    packets::{
+        Empty, configuration,
+        handshake::{self, Intention},
+        login::{self, ServerHello},
+        play,
+    },
+    registry::{Dynamic, ceil_log2},
+};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+
+/// A live connection: events in, the player's position out.
+pub struct Net {
+    pub events: Receiver<Event>,
+    shared: Arc<Shared>,
+}
+
+impl Net {
+    /// Tell the server where the player is (`MovePlayerPos`), so it keeps their chunks loaded and sees them move.
+    pub fn move_to(&self, pos: [f64; 3], on_ground: bool) {
+        let body = play::Serverbound::MovePlayerPos(play::MovePlayerPos { x: pos[0], y: pos[1], z: pos[2], flags: on_ground as u8 }).encode();
+        let _ = self.shared.send(&body);
+    }
+}
+
+pub enum Event {
+    /// The first position the server put the player at.
+    Spawn([f64; 3]),
+    /// A chunk column: block ids per 16-high section from the lowest one (`4096` bytes each, y-major).
+    Chunk { x: i32, z: i32, min_y: i32, sections: Vec<Vec<u8>> },
+    Block { pos: [i32; 3], block: u8 },
+    Closed(String),
+}
+
+struct Shared {
+    stream: TcpStream,
+    /// -1: no compression.
+    threshold: AtomicI32,
+    write_lock: Mutex<()>,
+}
+
+impl Shared {
+    fn threshold(&self) -> Option<usize> {
+        usize::try_from(self.threshold.load(Ordering::SeqCst)).ok()
+    }
+
+    fn send(&self, body: &[u8]) -> std::io::Result<()> {
+        let frame = frame::encode(body, self.threshold()).map_err(|e| std::io::Error::other(e.to_string()))?;
+        let _guard = self.write_lock.lock().unwrap();
+        (&self.stream).write_all(&frame)
+    }
+}
+
+struct Framer {
+    shared: Arc<Shared>,
+    buf: Vec<u8>,
+    inflater: frame::Inflater,
+}
+
+impl Framer {
+    /// The next packet: (id, payload after the id).
+    fn recv(&mut self) -> std::io::Result<(i32, Vec<u8>)> {
+        loop {
+            let bad = |e: horizon_protocol::Error| std::io::Error::other(e.to_string());
+            if let Some((head, len)) = frame::header(&self.buf).map_err(bad)? {
+                if self.buf.len() >= head + len {
+                    let frame_bytes: Vec<u8> = self.buf[head..head + len].to_vec();
+                    self.buf.drain(..head + len);
+                    let payload = match frame::body(&frame_bytes, self.shared.threshold(), &mut self.inflater).map_err(bad)? {
+                        frame::Body::Plain(at) => frame_bytes[at..].to_vec(),
+                        frame::Body::Inflated(v) => v,
+                    };
+                    let mut r = Reader::new(&payload);
+                    let id = r.varint().map_err(bad)?;
+                    let at = r.position();
+                    return Ok((id, payload[at..].to_vec()));
+                }
+            }
+            let mut tmp = [0u8; 4096];
+            let n = (&self.shared.stream).read(&mut tmp)?;
+            if n == 0 {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
+            self.buf.extend_from_slice(&tmp[..n]);
+        }
+    }
+}
+
+fn err(e: impl std::fmt::Display) -> String {
+    e.to_string()
+}
+
+fn raw(id: i32, write: impl FnOnce(&mut Writer)) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.varint(id);
+    write(&mut w);
+    w.data
+}
+
+/// The server's address: `server.txt` on the SD card, else the default (a Horizon server on this machine).
+pub fn server_address() -> SocketAddr {
+    std::fs::read_to_string("/vol/external01/horizon/server.txt")
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or_else(|| "127.0.0.1:25565".parse().unwrap())
+}
+
+fn load_states() -> Vec<u8> {
+    match std::fs::read("/vol/external01/horizon/states.bin") {
+        Ok(b) if b.len() >= 8 && &b[..4] == b"HZST" => b[8..].to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+/// Join `addr` as `name` (offline mode) and return the receiver of the events the connection produces.
+pub fn join(addr: SocketAddr, name: &str, view_distance: u8) -> Result<Net, String> {
+    let stream = TcpStream::connect(addr).map_err(err)?;
+    let shared = Arc::new(Shared { stream, threshold: AtomicI32::new(-1), write_lock: Mutex::new(()) });
+    let mut framer = Framer { shared: shared.clone(), buf: Vec::new(), inflater: frame::Inflater::default() };
+
+    shared
+        .send(&handshake::Serverbound::Intention(Intention { protocol: PROTOCOL_VERSION, host: addr.ip().to_string(), port: addr.port(), intent: handshake::LOGIN }).encode())
+        .map_err(err)?;
+    shared.send(&login::Serverbound::Hello(ServerHello { name: name.into(), uuid: offline_uuid(name) }).encode()).map_err(err)?;
+    loop {
+        let (id, body) = framer.recv().map_err(err)?;
+        match login::Clientbound::decode(id, &body).map_err(err)? {
+            login::Clientbound::Compression(p) => shared.threshold.store(p.threshold, Ordering::SeqCst),
+            login::Clientbound::LoginFinished(_) => {
+                shared.send(&login::Serverbound::LoginAcknowledged(Empty).encode()).map_err(err)?;
+                break;
+            }
+            login::Clientbound::Disconnect(p) => return Err(format!("refused: {}", p.reason_json)),
+            login::Clientbound::Hello(_) => return Err("the server is in online mode".into()),
+            login::Clientbound::CustomQuery(p) => shared
+                .send(&login::Serverbound::CustomQueryAnswer(login::CustomQueryAnswer { transaction: p.transaction, payload: None }).encode())
+                .map_err(err)?,
+            login::Clientbound::CookieRequest(p) => shared
+                .send(&login::Serverbound::CookieResponse(login::CookieResponse { key: p.key, payload: None }).encode())
+                .map_err(err)?,
+            login::Clientbound::Unknown(..) => {}
+        }
+    }
+
+    // configuration
+    use ids::configuration::clientbound as cb;
+    shared.send(&configuration::Serverbound::ClientInformation(configuration::ClientInformation::new(view_distance as i32)).encode()).map_err(err)?;
+    let mut w = Writer::new();
+    w.string("horizon");
+    shared
+        .send(&configuration::Serverbound::CustomPayload(configuration::CustomPayload { channel: "minecraft:brand".into(), data: w.data }).encode())
+        .map_err(err)?;
+    let mut dynamic = Dynamic::default();
+    loop {
+        let (id, body) = framer.recv().map_err(err)?;
+        match configuration::Clientbound::decode(id, &body) {
+            Ok(configuration::Clientbound::SelectKnownPacks(p)) => shared.send(&configuration::Serverbound::SelectKnownPacks(p).encode()).map_err(err)?,
+            Ok(configuration::Clientbound::KeepAlive(p)) => shared.send(&configuration::Serverbound::KeepAlive(p).encode()).map_err(err)?,
+            Ok(configuration::Clientbound::Ping(p)) => shared.send(&configuration::Serverbound::Pong(p).encode()).map_err(err)?,
+            Ok(configuration::Clientbound::CodeOfConduct(_)) => shared.send(&configuration::Serverbound::AcceptCodeOfConduct(Empty).encode()).map_err(err)?,
+            Ok(configuration::Clientbound::CookieRequest(p)) => shared
+                .send(&configuration::Serverbound::CookieResponse(configuration::CookieResponse { key: p.key, payload: None }).encode())
+                .map_err(err)?,
+            Ok(configuration::Clientbound::RegistryData(p)) => dynamic.add(p),
+            Ok(configuration::Clientbound::Disconnect(p)) => return Err(format!("disconnected during configuration: {}", horizon_protocol::text::plain(&p.reason, &Default::default()))),
+            Ok(configuration::Clientbound::FinishConfiguration(_)) => {
+                shared.send(&configuration::Serverbound::FinishConfiguration(Empty).encode()).map_err(err)?;
+                break;
+            }
+            _ => {
+                let _ = cb::FINISH_CONFIGURATION;
+            }
+        }
+    }
+    let biome_bits = ceil_log2(dynamic.len("minecraft:worldgen/biome").max(1));
+    println!("net: configuration done ({} biomes, {biome_bits} biome bits)", dynamic.len("minecraft:worldgen/biome"));
+
+    let (tx, rx) = mpsc::channel();
+    let states = load_states();
+    println!("net: {} block states in states.bin", states.len());
+    let for_thread = shared.clone();
+    std::thread::spawn(move || play(framer, for_thread, dynamic, biome_bits, states, tx));
+    Ok(Net { events: rx, shared })
+}
+
+fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u8, states: Vec<u8>, tx: Sender<Event>) {
+    use ids::play::clientbound as cb;
+    use ids::play::serverbound as sb;
+    let mut dimension = dynamic.dimension(0);
+    let mut batch_started = std::time::Instant::now();
+    let mut chunks = 0u32;
+    let block_bits = ceil_log2(states.len().max(2));
+    let close = |tx: &Sender<Event>, why: String| {
+        let _ = tx.send(Event::Closed(why));
+    };
+    loop {
+        let (id, body) = match framer.recv() {
+            Ok(p) => p,
+            Err(e) => return close(&tx, e.to_string()),
+        };
+        let mut r = Reader::new(&body);
+        let sent = match id {
+            cb::KEEP_ALIVE => match r.i64() {
+                Ok(v) => shared.send(&raw(sb::KEEP_ALIVE, |w| w.i64(v))),
+                Err(_) => Ok(()),
+            },
+            cb::PING => match r.i32() {
+                Ok(v) => shared.send(&raw(sb::PONG, |w| w.i32(v))),
+                Err(_) => Ok(()),
+            },
+            cb::LOGIN => {
+                if let Ok(play::Clientbound::Login(p)) = play::Clientbound::decode(id, &body) {
+                    dimension = dynamic.dimension(p.spawn.dimension_type);
+                    println!("net: joined {} ({} sections from y {})", p.spawn.dimension, dimension.sections(), dimension.min_y);
+                }
+                Ok(())
+            }
+            cb::CHUNK_BATCH_START => {
+                batch_started = std::time::Instant::now();
+                Ok(())
+            }
+            cb::CHUNK_BATCH_FINISHED => {
+                let _ = batch_started;
+                shared.send(&play::Serverbound::ChunkBatchReceived(play::ChunkBatchReceived { chunks_per_tick: 9.0 }).encode())
+            }
+            cb::PLAYER_POSITION => match play::Clientbound::decode(id, &body) {
+                Ok(play::Clientbound::PlayerPosition(p)) => {
+                    let _ = tx.send(Event::Spawn(p.position));
+                    shared.send(
+                        &play::Serverbound::AcceptTeleportation(play::AcceptTeleportation {
+                            id: p.teleport,
+                            x: p.position[0],
+                            y: p.position[1],
+                            z: p.position[2],
+                            yaw: p.yaw,
+                            pitch: p.pitch,
+                        })
+                        .encode(),
+                    )
+                }
+                _ => Ok(()),
+            },
+            cb::LEVEL_CHUNK_WITH_LIGHT => {
+                if let Ok(play::Clientbound::LevelChunkWithLight(p)) = play::Clientbound::decode(id, &body) {
+                    match p.chunk.sections(dimension.sections(), block_bits, biome_bits) {
+                        Ok(secs) => {
+                            chunks += 1;
+                            let sections = secs.iter().map(|s| section_blocks(s, &states)).collect();
+                            let _ = tx.send(Event::Chunk { x: p.x, z: p.z, min_y: dimension.min_y, sections });
+                        }
+                        Err(e) => println!("net: chunk {},{} did not decode: {e}", p.x, p.z),
+                    }
+                }
+                Ok(())
+            }
+            cb::BLOCK_UPDATE => {
+                if let Ok(play::Clientbound::BlockUpdate(p)) = play::Clientbound::decode(id, &body) {
+                    let b = states.get(p.state as usize).copied().unwrap_or(1);
+                    let _ = tx.send(Event::Block { pos: p.pos, block: b });
+                }
+                Ok(())
+            }
+            cb::DISCONNECT | cb::START_CONFIGURATION => return close(&tx, format!("server closed the game (packet {id})")),
+            _ => Ok(()),
+        };
+        if let Err(e) = sent {
+            return close(&tx, e.to_string());
+        }
+        if chunks > 0 && chunks % 25 == 0 && id == cb::LEVEL_CHUNK_WITH_LIGHT {
+            println!("net: {chunks} chunks received");
+        }
+    }
+}
+
+/// One section's block ids for the viewer, from its paletted states.
+fn section_blocks(s: &Section, states: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; 4096];
+    if s.non_empty == 0 {
+        return out;
+    }
+    for (i, slot) in out.iter_mut().enumerate() {
+        let state = s.states.get(i);
+        *slot = states.get(state as usize).copied().unwrap_or(1);
+    }
+    out
+}

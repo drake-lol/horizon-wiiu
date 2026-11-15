@@ -8,6 +8,7 @@ mod gfx;
 mod hud;
 mod loader;
 mod math;
+mod net;
 mod player;
 mod world;
 
@@ -43,6 +44,10 @@ struct Game {
     selected: usize,
     cooldown: u32,
     frame: u32,
+    /// Networked play: where the world window sits in server coordinates (x, y, z of its corner).
+    origin: [i32; 3],
+    spawned: bool,
+    pending: Vec<net::Event>,
 }
 
 impl Game {
@@ -100,8 +105,77 @@ impl Game {
         }
     }
 
+    /// Put a received chunk column into the window and queue its meshes.
+    fn apply_chunk(&mut self, x: i32, z: i32, min_y: i32, sections: &[Vec<u8>]) {
+        let (cx, cz) = (x - self.origin[0].div_euclid(16), z - self.origin[2].div_euclid(16));
+        let (nx, nz) = (self.world.sx as i32 / 16, self.world.sz as i32 / 16);
+        if cx < 0 || cz < 0 || cx >= nx || cz >= nz {
+            return;
+        }
+        let sy = self.world.sy as i32;
+        for (si, sec) in sections.iter().enumerate() {
+            let base = min_y + si as i32 * 16 - self.origin[1];
+            if base + 16 <= 0 || base >= sy {
+                continue;
+            }
+            for (i, &b) in sec.iter().enumerate() {
+                let wy = base + ((i >> 8) & 15) as i32;
+                if wy >= 0 && wy < sy {
+                    self.world.set((cx * 16) as usize + (i & 15), wy as usize, (cz * 16) as usize + ((i >> 4) & 15), world::Block::from_u8(b));
+                }
+            }
+        }
+        for (dx, dz) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)] {
+            let (c, d) = (cx + dx, cz + dz);
+            if c >= 0 && d >= 0 && c < nx && d < nz {
+                let i = self.chunk_index(c as usize, d as usize);
+                if !self.dirty.contains(&i) {
+                    self.dirty.push(i);
+                }
+            }
+        }
+    }
+
+    fn handle(&mut self, ev: net::Event) {
+        match ev {
+            net::Event::Spawn(p) => {
+                if !self.spawned {
+                    let (ox, oz) = ((p[0].floor() as i32).div_euclid(16) * 16 - 8 * 16, (p[2].floor() as i32).div_euclid(16) * 16 - 8 * 16);
+                    let oy = ((p[1].floor() as i32) - 32).div_euclid(16) * 16;
+                    self.origin = [ox, oy, oz];
+                    self.world.y0 = oy;
+                    self.player = Player::new([(p[0] - ox as f64) as f32, (p[1] - oy as f64) as f32, (p[2] - oz as f64) as f32]);
+                    self.spawned = true;
+                    println!("net: spawn at ({:.1}, {:.1}, {:.1}); window origin {:?}", p[0], p[1], p[2], self.origin);
+                    for ev in std::mem::take(&mut self.pending) {
+                        self.handle(ev);
+                    }
+                }
+            }
+            net::Event::Chunk { x, z, min_y, sections } => {
+                if self.spawned {
+                    self.apply_chunk(x, z, min_y, &sections);
+                } else {
+                    self.pending.push(net::Event::Chunk { x, z, min_y, sections });
+                }
+            }
+            net::Event::Block { pos, block } => {
+                if self.spawned {
+                    let (lx, ly, lz) = (pos[0] - self.origin[0], pos[1] - self.origin[1], pos[2] - self.origin[2]);
+                    if lx >= 0 && ly >= 0 && lz >= 0 && (lx as usize) < self.world.sx && (ly as usize) < self.world.sy && (lz as usize) < self.world.sz {
+                        self.world.set(lx as usize, ly as usize, lz as usize, world::Block::from_u8(block));
+                        self.mark_dirty(lx, lz);
+                    }
+                }
+            }
+            net::Event::Closed(why) => println!("net: connection closed: {why}"),
+        }
+    }
+
     fn remesh(&mut self, gfx: &gfx::Gfx) {
-        let dirty = std::mem::take(&mut self.dirty);
+        // a bounded number per frame: a joining client receives hundreds of chunks at once
+        let take = self.dirty.len().min(6);
+        let dirty: Vec<usize> = self.dirty.drain(..take).collect();
         for i in dirty {
             let (cx, cz) = (i % CHUNKS_X, i / CHUNKS_X);
             let verts = self.world.mesh_chunk(cx, cz);
@@ -145,7 +219,18 @@ fn main() {
     let ok = gfx.set_texture(atlas::WIDTH as u32, atlas::HEIGHT as u32, &atlas::build());
     println!("horizon-wiiu: atlas texture -> {ok}");
 
-    let world = loader::load().unwrap_or_else(world::World::generate);
+    // The real game first: join a Horizon server; with none, the offline viewer world.
+    let net = match net::join(net::server_address(), "WiiU", 6) {
+        Ok(n) => {
+            println!("net: joined {}", net::server_address());
+            Some(n)
+        }
+        Err(e) => {
+            println!("net: no server ({e}); offline world");
+            None
+        }
+    };
+    let world = if net.is_some() { world::World::empty(256, 96, 256, 0) } else { loader::load().unwrap_or_else(world::World::generate) };
     println!("horizon-wiiu: world {}x{}x{} (y0 {})", world.sx, world.sy, world.sz, world.y0);
 
     let (cw, cd) = (world.sx / world::CHUNK, world.sz / world::CHUNK);
@@ -162,7 +247,7 @@ fn main() {
 
     let (sx, sz) = (world.sx / 2, world.sz / 2);
     let spawn = [sx as f32 + 0.5, world.surface(sx, sz) as f32 + 2.0, sz as f32 + 0.5];
-    let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0 };
+    let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0, origin: [0; 3], spawned: net.is_none(), pending: Vec::new() };
     let mut manual = false;
     let mut broke = 0u32;
     let mut placed = 0u32;
@@ -202,11 +287,22 @@ fn main() {
             }
         }
 
-        game.player.update(&game.world, &input);
+        if let Some(n) = &net {
+            while let Ok(ev) = n.events.try_recv() {
+                game.handle(ev);
+            }
+        }
+        if game.spawned {
+            game.player.update(&game.world, &input);
+        }
+        if let (Some(n), true) = (&net, game.spawned && game.frame % 3 == 0) {
+            let p = &game.player;
+            n.move_to([p.pos[0] as f64 + game.origin[0] as f64, p.pos[1] as f64 + game.origin[1] as f64, p.pos[2] as f64 + game.origin[2] as f64], p.on_ground);
+        }
         if game.cooldown > 0 {
             game.cooldown -= 1;
         }
-        if game.cooldown == 0 && (want_break || want_place) {
+        if game.cooldown == 0 && (want_break || want_place) && net.is_none() {
             if want_break {
                 game.break_block();
                 broke += 1;

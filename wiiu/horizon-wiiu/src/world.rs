@@ -30,6 +30,26 @@ pub enum Block {
 }
 
 impl Block {
+    pub fn from_u8(v: u8) -> Block {
+        match v {
+            1 => Block::Stone,
+            2 => Block::Dirt,
+            3 => Block::Grass,
+            4 => Block::Sand,
+            5 => Block::Water,
+            6 => Block::Snow,
+            7 => Block::Log,
+            8 => Block::Leaves,
+            9 => Block::Planks,
+            10 => Block::Gravel,
+            11 => Block::Sandstone,
+            12 => Block::Ice,
+            13 => Block::Lava,
+            14 => Block::Bedrock,
+            _ => Block::Air,
+        }
+    }
+
     pub fn solid(self) -> bool {
         !matches!(self, Block::Air | Block::Water | Block::Lava)
     }

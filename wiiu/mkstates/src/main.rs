@@ -13,7 +13,7 @@ mod loader;
 #[allow(dead_code)]
 mod world;
 
-use horizon_world::registry::BlockRegistry;
+use horizon_world::registry::{BlockRegistry, BlockStateId};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -24,7 +24,7 @@ fn main() {
     let mut table = Vec::with_capacity(n);
     let mut counts = [0usize; 32];
     for id in 0..n {
-        let name = registry.state(id as u32).map(|s| s.name.clone()).unwrap_or_default();
+        let name = registry.state(BlockStateId(id as u32)).map(|s| s.name.clone()).unwrap_or_default();
         let b = loader::block_for(&name) as u8;
         counts[b as usize] += 1;
         table.push(b);
@@ -33,6 +33,6 @@ fn main() {
     file.extend_from_slice(&(n as u32).to_be_bytes());
     file.extend_from_slice(&table);
     std::fs::write(&out, &file).expect("write");
-    println!("{n} states -> {} bytes; first states: {:?}", file.len(), (0..4).map(|i| registry.state(i).map(|s| s.name.clone())).collect::<Vec<_>>());
+    println!("{n} states -> {} bytes; first states: {:?}", file.len(), (0..4).map(|i| registry.state(BlockStateId(i)).map(|s| s.name.clone())).collect::<Vec<_>>());
     println!("by block id: {:?}", &counts[..16]);
 }
