@@ -125,6 +125,14 @@ pub unsafe extern "C" fn __wrap_ftruncate(fd: c_int, len: i64) -> c_int {
     }
 }
 
+/// Linked with `--wrap=setsockopt` (wiiu/tools/bldrpx.sh). Cemu's socket layer traps on options it
+/// does not know (std's `connect_timeout` sets one to go non-blocking); none is needed for the game's
+/// blocking sockets, so every option is accepted and ignored.
+#[no_mangle]
+pub unsafe extern "C" fn __wrap_setsockopt(_fd: c_int, _level: c_int, _name: c_int, _value: *const u8, _len: c_uint) -> c_int {
+    0
+}
+
 /// No pipes on the Wii U (mio's waker asks for one): fail with ENOSYS.
 #[no_mangle]
 pub unsafe extern "C" fn pipe2(_fds: *mut c_int, _flags: c_int) -> c_int {
