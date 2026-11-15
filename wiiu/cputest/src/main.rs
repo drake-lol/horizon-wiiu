@@ -83,6 +83,47 @@ fn fdiv(x: f64, y: f64) -> f64 {
     x / y
 }
 
+#[inline(never)]
+fn combo_u32(a: u64, b: u64) -> u64 {
+    let (x, y) = (a as u32, b as u32);
+    ((x < y) as u64) | (((x as i32) < (y as i32)) as u64) << 1 | ((x == y) as u64) << 2 | (x.cmp(&y) as i8 as u8 as u64) << 3
+}
+#[inline(never)]
+fn combo_u16(a: u64, b: u64) -> u64 {
+    let (x, y) = (a as u16, b as u16);
+    ((x < y) as u64) | (x.cmp(&y) as i8 as u8 as u64) << 1
+}
+#[inline(never)]
+fn combo_sat(a: u64, b: u64) -> u64 {
+    a.saturating_sub(b) ^ a.saturating_add(b)
+}
+
+fn combos() {
+    let mut r = Rng(77);
+    let mut bad = 0;
+    for i in 0..4000u32 {
+        let a = if i % 3 == 0 { r.next() & 0xFFFF } else { r.next() };
+        let b = if i % 5 == 0 { a } else if i % 3 == 0 { r.next() & 0xFFFF } else { r.next() };
+        let got = [combo_u32(bb(a), bb(b)), combo_u16(bb(a), bb(b)), combo_sat(bb(a), bb(b))];
+        let (x, y) = (a as u32, b as u32);
+        let o32 = if x < y { 0xFFu64 } else if x == y { 0 } else { 1 };
+        let want32 = ((x < y) as u64) | (((x as i32) < (y as i32)) as u64) << 1 | ((x == y) as u64) << 2 | o32 << 3;
+        let (p, q) = (a as u16, b as u16);
+        let o16 = if p < q { 0xFFu64 } else if p == q { 0 } else { 1 };
+        let want16 = ((p < q) as u64) | o16 << 1;
+        let ss = if a > b { a - b } else { 0 };
+        let sa = if a > u64::MAX - b { u64::MAX } else { a + b };
+        let want = [want32, want16, ss ^ sa];
+        for k in 0..3 {
+            if got[k] != want[k] && bad < 12 {
+                println!("combo{k} a={a:#x} b={b:#x} got {:#x} want {:#x}", got[k], want[k]);
+                bad += 1;
+            }
+        }
+    }
+    println!("combos done, {bad} bad");
+}
+
 fn micro() {
     let pairs: [(u64, u64); 10] = [
         (0, 0), (1, 2), (2, 1), (0x8000_0000, 1), (1, 0x8000_0000), (0xFFFF_FFFF, 0), (5, 5),
@@ -115,6 +156,7 @@ fn main() {
         wut_sys::WHBProcInit();
     }
     micro();
+    combos();
     let mut r = Rng(0x1234_5678_9ABC_DEF1);
     let v = values(&mut r);
     run("u64 add", |a, b| a.wrapping_add(b), &v);
