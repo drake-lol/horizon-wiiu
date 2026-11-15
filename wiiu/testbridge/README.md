@@ -32,7 +32,7 @@ wiiuctl.py touch 427 240               # GamePad screen pixels (854 x 480)
 wiiuctl.py run ../horizon-real/target/powerpc-nintendo-wiiu/release/horizon-real.rpx
 wiiuctl.py logs                        # console output while a program runs
 wiiuctl.py watch shots/                # a screenshot every 5 s
-wiiuctl.py menu | reboot | shutdown | launch <title id>
+wiiuctl.py menu | reboot | shutdown | launch <title id>   # reboot relaunches the OS and Aroma, no power cycle
 wiiuctl.py script smoke.txt            # a test: commands, `wait <ms>`, `shot <file>`, `run <rpx>`, `expect-ping`
 ```
 
@@ -62,8 +62,15 @@ docker run --rm -v "$PWD":/project wups-build make      # HorizonTestBridge.wps
 
 - HOME is injected like any button, but the system reads the GamePad's HOME button on its own, so the HOME Menu
   may not open from an injected press. `menu` returns to the Wii U Menu instead.
-- A screenshot copies one frame from the GPU: it costs that frame a few milliseconds. With no frame presented
-  for 5 s (a paused or hung application) `shot` reports so.
+- Screenshots ask no work of the GPU (a GPU copy hung real consoles). The plugin learns where the application's
+  scan buffers are from `GX2SetTVBuffer`/`GX2SetDRCBuffer`, marks a few pixels of each slot, and after the
+  application's own `GX2CopyColorBufferToScanBuffer` reads the slot whose marks were overwritten, untiling it
+  (2D_TILED_THIN1, 32-bit) on the CPU. `GX2GetLastFrame` is not used: it returns a frame saved when the application
+  started. With no frame presented for 5 s (a paused or hung application) `shot` reports so.
+- Diagnostics: `SCANINFO` (where the scan buffers are), `SHOTRAW TV|DRC` (a slot's bytes untouched), and `INFO`
+  counts `VPADRead` calls.
+- Tested on a real console: screenshots of both screens, button presses, `reboot`. Not yet: touch, `shutdown`,
+  `launch`, and `run` (Aroma's Wiiload stopped reading halfway through a 100 KB upload; under investigation).
 - The server restarts with each application; `wiiuctl.py` reconnects by itself.
 - Anyone on the network can reach port 4410 while the plugin is loaded: disable it in Aroma's plugin menu when
   not testing.
