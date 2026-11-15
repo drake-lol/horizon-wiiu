@@ -56,3 +56,14 @@ before PlayerLoaded, each teleport answered once; the server stalls its tick whi
 so the client waits for the chunk stream to settle and then sends 10 positions a second.
 Not the real client: the front end (renderer, input, physics, HUD) is Wii U code written here; the game logic is the
 real server's. Block editing is not sent to the server yet; textures are still placeholders.
+
+## Status: real textures (milestone 1 of the full-port plan)
+`wiiu/mkatlas` packs the player's own block textures (from their prepared `assets/minecraft/textures/block`) into a
+1024x160 atlas (592 textures) and maps all 35,723 block states to 486 block types (top/side/bottom tile, tint flags),
+written as `atlas.rgba`, `types.bin`, `states.bin`, `hotbar.bin` for the SD card (`/vol/external01/horizon/`).
+The client loads them when it has joined a server; the world stores type ids (u16), the mesher tints grass, foliage and
+water, and the HUD hotbar shows real icons. Seen in Cemu against the real server: real mossy stone, vines, a giant red
+mushroom cap, tinted water. Known gaps: only full cubes are drawn (stairs, slabs, plants, fences are skipped), leaves and
+glass have no transparency (the console shader has no alpha test), liquids are opaque, no biome-accurate tints, a fixed
+256x128x256 window, no lighting. Next: transparency (needs a second Latte shader), non-cube models from
+`model-states.json`, lighting from the packets' light data, entities, then sending actions to the server.
