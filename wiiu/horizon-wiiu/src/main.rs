@@ -49,6 +49,7 @@ struct Game {
     origin: [i32; 3],
     spawned: bool,
     pending: Vec<net::Event>,
+    verts_total: u64,
 }
 
 impl Game {
@@ -182,6 +183,10 @@ impl Game {
             let (cx, cz) = (i % CHUNKS_X, i / CHUNKS_X);
             let verts = self.world.mesh_chunk(cx, cz);
             let fresh = gfx.upload(&verts);
+            if fresh.is_none() && !verts.is_empty() {
+                println!("horizon-wiiu: chunk {cx},{cz}: upload of {} vertices failed", verts.len());
+            }
+            self.verts_total += verts.len() as u64;
             if let Some(old) = std::mem::replace(&mut self.meshes[i], fresh) {
                 self.retired.push((self.frame, old));
             }
@@ -251,7 +256,7 @@ fn main() {
 
     let (sx, sz) = (world.sx / 2, world.sz / 2);
     let spawn = [sx as f32 + 0.5, world.surface(sx, sz) as f32 + 2.0, sz as f32 + 0.5];
-    let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0, origin: [0; 3], spawned: net.is_none(), pending: Vec::new() };
+    let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0, origin: [0; 3], spawned: net.is_none(), pending: Vec::new(), verts_total: 0 };
     let mut manual = false;
     let mut last_move = std::time::Instant::now();
     let mut loaded_at: Option<std::time::Instant> = None;
@@ -343,6 +348,7 @@ fn main() {
         game.frame += 1;
         if game.frame % 120 == 0 {
             let p = &game.player;
+            println!("horizon-wiiu: meshes {} verts_total {}", game.meshes.iter().flatten().count(), game.verts_total);
             println!("horizon-wiiu: frame {} pos ({}, {}, {}) dm ground={} broke={broke} placed={placed}", game.frame, (p.pos[0] * 10.0) as i64, (p.pos[1] * 10.0) as i64, (p.pos[2] * 10.0) as i64, p.on_ground);
         }
     }
