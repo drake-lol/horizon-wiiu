@@ -130,6 +130,14 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
                     _ => Vec::new(),
                 };
                 println!("loader: chunk {cx},{cz}: no sections list; keys {keys:?}; {} compressed bytes, {:?}", record.compressed.len(), record.compression);
+                if let Tag::Compound(m) = &root.tag {
+                    let want: Vec<u16> = "sections".encode_utf16().collect();
+                    for (k, v) in m.iter() {
+                        println!("loader:   key len={} units={:?} eq_sections={} cmp={:?} is_list={}", k.0.len(), k.0, k.0 == want, k.0.cmp(&want), matches!(v, Tag::List(_)));
+                    }
+                    let j = horizon_world::nbt::JavaString::from("sections");
+                    println!("loader:   map.get(JavaString) = {}", m.get(&j).is_some());
+                }
                 continue;
             };
             if cx < 2 && cz < 2 {
