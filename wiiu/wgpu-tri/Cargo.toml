@@ -1,0 +1,24 @@
+[package]
+name = "wgpu-tri"
+version = "0.1.0"
+edition = "2021"
+description = "wgpu on the Wii U through the GX2 backend: WGSL compiled on the console, a uniform buffer, a texture, a sampler"
+
+[workspace]
+
+[dependencies]
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "noop"] }
+pollster = "0.4"
+raw-window-handle = "0.6"
+bytemuck = { version = "1.24", features = ["derive"] }
+wut-sys = { path = "../wut-sys" }
+wiiu-atomics = { path = "../atomics", features = ["console-stdout", "trace-fatal"] }
+
+[patch.crates-io]
+wgpu-hal = { path = "../../third_party/wgpu-hal" }
+naga = { path = "../../third_party/naga" }
+
+[profile.release]
+opt-level = 1
+panic = "abort"
+debug = false
