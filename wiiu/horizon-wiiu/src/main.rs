@@ -328,7 +328,7 @@ fn main() {
         game.frame += 1;
         if game.frame % 120 == 0 {
             let p = &game.player;
-            println!("horizon-wiiu: frame {} pos ({:.1}, {:.1}, {:.1}) ground={} broke={broke} placed={placed}", game.frame, p.pos[0], p.pos[1], p.pos[2], p.on_ground);
+            println!("horizon-wiiu: frame {} pos ({}, {}, {}) dm ground={} broke={broke} placed={placed}", game.frame, (p.pos[0] * 10.0) as i64, (p.pos[1] * 10.0) as i64, (p.pos[2] * 10.0) as i64, p.on_ground);
         }
     }
     drop(game);

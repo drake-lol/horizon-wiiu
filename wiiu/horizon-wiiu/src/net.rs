@@ -35,6 +35,12 @@ pub struct Net {
 impl Net {
     /// Tell the server where the player is (`MovePlayerPos`), so it keeps their chunks loaded and sees them move.
     pub fn move_to(&self, pos: [f64; 3], on_ground: bool) {
+        static SENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = SENT.fetch_add(1, Ordering::Relaxed);
+        if n < 12 || n % 60 == 0 {
+            // integers, not floats: the float formatter misbehaves on this target (see wiiu/README.md)
+            println!("net: move #{n} to ({}, {}, {}) milli-blocks ground={on_ground}", (pos[0] * 1000.0) as i64, (pos[1] * 1000.0) as i64, (pos[2] * 1000.0) as i64);
+        }
         let body = play::Serverbound::MovePlayerPos(play::MovePlayerPos { x: pos[0], y: pos[1], z: pos[2], flags: on_ground as u8 }).encode();
         let _ = self.shared.send(&body);
     }
