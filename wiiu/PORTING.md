@@ -18,8 +18,9 @@ Goal: the real Horizon (Minecraft: Java Edition 26.3 in Rust) on the Wii U, not 
 2. **Thin client over the real protocol**: Wii U front end uses `horizon-protocol` (login, configuration, play,
    chunk decoding in `chunk.rs`) against a real `horizon-server`. `crates/horizon-bots` is the reference client flow.
    Verify against a real server before anything else.
-3. **Renderer**: replace `horizon-client-render` (wgpu, 36 WGSL shaders, compute) with a GX2 renderer; shaders are
-   written in Latte assembly (`wiiu/shaders`, `wiiu/tools/asm.sh`); real textures from the prepared atlas.
+3. **Renderer**: the real `horizon-client-render` on wgpu, through a GX2 backend for wgpu-hal and a shader compiler
+   that runs on the console (see "Status: the real renderer" below). The hand-written Latte shaders in
+   `wiiu/shaders` were the bring-up step before it.
 4. **Platform layer**: window/input/audio/clipboard replacements (VPAD/KPAD, AX), SD-card paths.
 5. **Fit in ~1 GB**: chunk caches, render distance, texture formats.
 6. **Real hardware**: everything so far was run only in Cemu.
@@ -67,3 +68,37 @@ mushroom cap, tinted water. Known gaps: only full cubes are drawn (stairs, slabs
 glass have no transparency (the console shader has no alpha test), liquids are opaque, no biome-accurate tints, a fixed
 256x128x256 window, no lighting. Next: transparency (needs a second Latte shader), non-cube models from
 `model-states.json`, lighting from the packets' light data, entities, then sending actions to the server.
+
+## Status: the real renderer, through wgpu on GX2
+
+The real renderer and its WGSL shaders are being ported rather than replaced:
+
+- **`wiiu/latte`**: Latte (R700) machine code from instructions: control flow, ALU groups with literals and kcache,
+  texture and vertex-fetch clauses. Byte for byte equal to decaf's `latte-assembler` on our hand-written shaders.
+- **`wiiu/naga-latte`**: naga IR to Latte, compiled on the console at pipeline creation. Functions are inlined;
+  `if`/loops/`switch`/early return become Latte control flow; uniforms read through the kcache (dynamic indices
+  and storage buffers through vertex fetch from GX2 uniform blocks, buffer 128 + location); textures, gradients,
+  integer division, bit counting. A Latte interpreter (`interp.rs`) runs the compiled words in tests.
+  `cargo test --test renderer -- --nocapture` compiles every vertex and fragment entry point of
+  `horizon-client-render`: **292 of 294 compile**; the two left write storage buffers (GPU culling, optional).
+- **`third_party/wgpu-hal/src/gx2`**: a wgpu-hal backend over GX2, in the `Noop` slot on `target_vendor = "wiiu"`
+  (wgpu-core unchanged; the renderer asks for `Backends::NOOP` there). Buffers and textures in MEM2; command
+  buffers replay at submit; uniform buffers keep 32-bit-swapped words for the kcache while vertex, index and
+  storage data stay big-endian and are swapped by the GPU as it reads. The surface is a colour buffer of the
+  configured size that present copies to the TV and the GamePad (GX2 scales; Cemu's TV is 1080p).
+  Not yet: mipmaps (level 0 only), sampling depth textures, compute, queries, MSAA.
+- **`third_party/winit`**: a Wii U platform (one window the size of the TV picture; the client runs its own loop).
+  With it, `wiiu/rendercheck` (all of `horizon-client-render` with wgpu) **builds for the Wii U target**.
+- **`wiiu/wgpu-tri`**: wgpu on the console: WGSL compiled at run time, a uniform buffer, a texture and sampler,
+  `discard`, indexed draws, presented to the TV. Runs in Cemu (screenshot in the PR notes).
+
+### Cemu's recompiler miscomputes some of LLVM's code: test with `--force-interpreter`
+
+`wiiu/cputest` runs the same computations on the host and on the console and diffs them. Under Cemu's default
+JIT recompiler, large functions get wrong answers (64-bit saturating arithmetic, `Ordering` from 16/32-bit
+`cmp`, slice ordering); the same code in small functions is right, and every instruction tested alone (carry
+ops, `mtcrf`/`mcrf`, CR branches) is right. Under `Cemu --force-interpreter` every integer result matches the
+host. This is the cause of the "miscompiles" noted earlier in this port (opt-level choices, `JavaString` `Ord`,
+the move gate) and of wgpu-core's corrupted command-buffer list: it is the emulator, not LLVM or the port.
+So: test in Cemu with `--force-interpreter` (`wiiu/tools/runcemu.sh` passes it), slower but faithful; real
+hardware runs the code as compiled. The remaining f64 difference is Cemu's fused multiply-add rounding.
