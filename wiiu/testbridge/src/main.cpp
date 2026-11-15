@@ -57,7 +57,7 @@ WUPS_PLUGIN_VERSION("v0.1");
 WUPS_PLUGIN_AUTHOR("Horizon");
 WUPS_PLUGIN_LICENSE("MIT");
 
-WUPS_USE_WUT_SOCKETS();
+// (wut sockets come with the plugin metadata in this WUPS version)
 
 static constexpr uint16_t PORT    = 4410;
 static constexpr const char *VERSION = "0.1";
