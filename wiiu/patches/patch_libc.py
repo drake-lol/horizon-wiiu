@@ -104,3 +104,16 @@ t = t.replace(old, """        all(target_os = "vita", not(target_vendor = "wiiu"
 open(m, "w").write(t)
 print("patched types", m)
 
+
+# --- functions newlib on the Wii U lacks but crates expect on unix; wiiu/atomics defines stand-ins.
+t = open(v).read()
+if "pub fn dirfd" not in t:
+    t += '''
+#[cfg(target_vendor = "wiiu")]
+extern "C" {
+    // wiiu/atomics: no directory file descriptors on the Wii U (returns -1, ENOTSUP)
+    pub fn dirfd(dirp: *mut crate::DIR) -> crate::c_int;
+}
+'''
+    open(v, "w").write(t)
+    print("patched", v, "(dirfd)")

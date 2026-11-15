@@ -103,6 +103,12 @@ pub unsafe extern "C" fn lchown(_path: *const c_char, _owner: c_uint, _group: c_
     unsafe { fail() }
 }
 
+/// No file descriptors behind directory streams here (newlib's `DIR` has none).
+#[no_mangle]
+pub unsafe extern "C" fn dirfd(_dirp: *mut u8) -> c_int {
+    -1
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn chroot(_path: *const c_char) -> c_int {
     unsafe { fail() }
