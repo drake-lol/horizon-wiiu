@@ -72,6 +72,7 @@ fn region_files(dir: &str) -> Vec<(i32, i32, String)> {
     let Ok(read) = std::fs::read_dir(dir) else { return out };
     for entry in read.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
+        println!("loader:   entry {name:?}");
         let parts: Vec<&str> = name.split('.').collect();
         if parts.len() == 4 && parts[0] == "r" && parts[3] == "mca" {
             if let (Ok(x), Ok(z)) = (parts[1].parse(), parts[2].parse()) {
