@@ -36,7 +36,7 @@ mod conv;
 mod shader;
 
 /// Print what the backend does (to the console / Cemu's log), while it is brought up.
-pub(crate) const TRACE: bool = true;
+pub(crate) const TRACE: bool = false;
 
 macro_rules! trace {
     ($($t:tt)*) => {
@@ -170,9 +170,24 @@ pub struct Queue {
     shared: Arc<Mutex<Shared>>,
 }
 
+/// The picture wgpu renders, at the size it configured; present copies it to the TV and the GamePad, which
+/// GX2 scales to each screen (the TV may be 1080p).
+pub struct Frame {
+    texture: Texture,
+    color: Box<GX2ColorBuffer>,
+}
+
+unsafe impl Send for Frame {}
+
 #[derive(Debug)]
 pub struct Surface {
-    configured: Mutex<Option<wgt::TextureFormat>>,
+    configured: Mutex<Option<Frame>>,
+}
+
+impl core::fmt::Debug for Frame {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Frame({:?})", self.texture)
+    }
 }
 
 #[derive(Debug)]
@@ -524,8 +539,26 @@ impl crate::Instance for Instance {
 impl crate::Surface for Surface {
     type A = Api;
 
-    unsafe fn configure(&self, _device: &Device, config: &crate::SurfaceConfiguration) -> Result<(), crate::SurfaceError> {
-        *self.configured.lock().unwrap() = Some(config.format);
+    unsafe fn configure(&self, device: &Device, config: &crate::SurfaceConfiguration) -> Result<(), crate::SurfaceError> {
+        let desc = crate::TextureDescriptor {
+            label: None,
+            size: config.extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgt::TextureDimension::D2,
+            format: wgt::TextureFormat::Rgba8Unorm,
+            usage: config.usage | wgt::TextureUses::COLOR_TARGET,
+            memory_flags: crate::MemoryFlags::empty(),
+            view_formats: Vec::new(),
+        };
+        use crate::Device as _;
+        let texture = unsafe { device.create_texture(&desc) }.map_err(|_| crate::SurfaceError::Other("GX2 surface texture"))?;
+        let mut color: Box<GX2ColorBuffer> = Box::new(unsafe { core::mem::zeroed() });
+        color.surface = texture.surface;
+        color.viewNumSlices = 1;
+        unsafe { GX2InitColorBufferRegs(&mut *color) };
+        trace!("gx2: surface {}x{}", config.extent.width, config.extent.height);
+        *self.configured.lock().unwrap() = Some(Frame { texture, color });
         Ok(())
     }
 
@@ -538,22 +571,21 @@ impl crate::Surface for Surface {
         _timeout: Option<Duration>,
         _fence: &Fence,
     ) -> Result<crate::AcquiredSurfaceTexture<Api>, crate::SurfaceError> {
+        let frame = self.configured.lock().unwrap();
+        let frame = frame.as_ref().ok_or(crate::SurfaceError::Outdated)?;
         // SAFETY: WHBGfx is initialised (Instance::init's contract).
-        unsafe {
-            WHBGfxBeginRender();
-            let cb = &*WHBGfxGetTVColourBuffer();
-            Ok(crate::AcquiredSurfaceTexture {
-                texture: Texture {
-                    surface: cb.surface,
-                    mem: None,
-                    format: wgt::TextureFormat::Rgba8Unorm,
-                    bpe: 4,
-                    mips: 1,
-                    linear: false,
-                },
-                suboptimal: false,
-            })
-        }
+        unsafe { WHBGfxBeginRender() };
+        Ok(crate::AcquiredSurfaceTexture {
+            texture: Texture {
+                surface: frame.texture.surface,
+                mem: None,
+                format: wgt::TextureFormat::Rgba8Unorm,
+                bpe: 4,
+                mips: 1,
+                linear: false,
+            },
+            suboptimal: false,
+        })
     }
 
     unsafe fn discard_texture(&self, _texture: Texture) {}
@@ -597,6 +629,7 @@ impl crate::Adapter for Adapter {
             }],
             maximum_frame_latency: 1..=2,
             current_extent: Some(wgt::Extent3d { width: TV.0, height: TV.1, depth_or_array_layers: 1 }),
+            // any size: present scales the picture to each screen
             usage: wgt::TextureUses::COLOR_TARGET | wgt::TextureUses::COPY_SRC | wgt::TextureUses::COPY_DST,
             present_modes: vec![wgt::PresentMode::Fifo],
             composite_alpha_modes: vec![wgt::CompositeAlphaMode::Opaque],
@@ -637,12 +670,13 @@ impl crate::Queue for Queue {
         Ok(())
     }
 
-    unsafe fn present(&self, _surface: &Surface, _texture: Texture) -> Result<(), crate::SurfaceError> {
+    unsafe fn present(&self, surface: &Surface, _texture: Texture) -> Result<(), crate::SurfaceError> {
         let mut shared = self.shared.lock().unwrap();
+        let frame = surface.configured.lock().unwrap();
+        let frame = frame.as_ref().ok_or(crate::SurfaceError::Outdated)?;
         unsafe {
-            let tv = WHBGfxGetTVColourBuffer();
-            GX2CopyColorBufferToScanBuffer(tv, GX2ScanTarget_GX2_SCAN_TARGET_TV);
-            GX2CopyColorBufferToScanBuffer(tv, GX2ScanTarget_GX2_SCAN_TARGET_DRC);
+            GX2CopyColorBufferToScanBuffer(&*frame.color, GX2ScanTarget_GX2_SCAN_TARGET_TV);
+            GX2CopyColorBufferToScanBuffer(&*frame.color, GX2ScanTarget_GX2_SCAN_TARGET_DRC);
             // swaps, flushes and waits for the GPU
             WHBGfxFinishRender();
         }
