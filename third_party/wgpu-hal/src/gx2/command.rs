@@ -1,7 +1,7 @@
 //! Command recording and replay. Encoders record a list; the queue replays it at submit, issuing GX2 calls
 //! for GPU work and doing copies on the CPU (after waiting for the GPU when it may still use the memory).
 
-use alloc::{vec, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 use core::mem;
 use core::ops::Range;
 

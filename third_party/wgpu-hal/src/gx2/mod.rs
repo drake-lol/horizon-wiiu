@@ -1124,7 +1124,7 @@ impl crate::Device for Device {
             blends,
             masks,
             targets,
-            label: desc.label.unwrap_or("?").to_string(),
+            label: String::from(desc.label.unwrap_or("?")),
         })
     }
 
