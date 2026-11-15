@@ -19,6 +19,6 @@ wgpu-hal = { path = "../../third_party/wgpu-hal" }
 naga = { path = "../../third_party/naga" }
 
 [profile.release]
-opt-level = 1
+opt-level = 0
 panic = "abort"
 debug = false
