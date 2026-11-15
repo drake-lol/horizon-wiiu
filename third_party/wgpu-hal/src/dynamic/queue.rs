@@ -30,6 +30,14 @@ impl<Q: Queue + DynResource> DynQueue for Q {
         surface_textures: &[&dyn DynSurfaceTexture],
         signal_fence: (&dyn DynFence, FenceValue),
     ) -> Result<(), DeviceError> {
+        #[cfg(target_vendor = "wiiu")]
+        if crate::gx2::TRACE {
+            for cb in command_buffers {
+                // SAFETY: a fat pointer is (data, vtable).
+                let (d, v): (usize, usize) = unsafe { core::mem::transmute(*cb) };
+                std::println!("gx2: dyn cb data {d:#x} vtable {v:#x}");
+            }
+        }
         let command_buffers = command_buffers
             .iter()
             .map(|cb| (*cb).expect_downcast_ref())
