@@ -32,6 +32,7 @@
 #include <gx2/mem.h>
 #include <gx2/surface.h>
 #include <gx2/swap.h>
+#include <gx2/texture.h>
 #include <sysapp/launch.h>
 #include <vpad/input.h>
 
