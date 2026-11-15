@@ -12,6 +12,7 @@ impl From<&str> for JavaString {
 }
 /// `key` in UTF-16 in a buffer kept per thread, to search a compound
 /// without allocating a key every time.
+#[cfg(not(target_vendor = "wiiu"))]
 fn with_key<R>(key: &str, f: impl FnOnce(&JavaString) -> R) -> R {
     thread_local! {
         static KEY: std::cell::RefCell<JavaString> = Default::default();
@@ -21,6 +22,12 @@ fn with_key<R>(key: &str, f: impl FnOnce(&JavaString) -> R) -> R {
         units.0.extend(key.encode_utf16());
         f(units)
     })
+}
+
+/// The Wii U has no native thread-locals; allocate the key instead of caching it per thread.
+#[cfg(target_vendor = "wiiu")]
+fn with_key<R>(key: &str, f: impl FnOnce(&JavaString) -> R) -> R {
+    f(&JavaString::from(key))
 }
 
 impl JavaString {
