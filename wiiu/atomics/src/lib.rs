@@ -103,6 +103,20 @@ pub unsafe extern "C" fn lchown(_path: *const c_char, _owner: c_uint, _group: c_
     unsafe { fail() }
 }
 
+/// No pipes on the Wii U (mio's waker asks for one): fail with ENOSYS.
+#[no_mangle]
+pub unsafe extern "C" fn pipe2(_fds: *mut c_int, _flags: c_int) -> c_int {
+    set_errno(88);
+    -1
+}
+
+/// File times cannot be set on the SD card through newlib: fail with ENOSYS.
+#[no_mangle]
+pub unsafe extern "C" fn futimens(_fd: c_int, _times: *const u8) -> c_int {
+    set_errno(88);
+    -1
+}
+
 /// No file descriptors behind directory streams here (newlib's `DIR` has none).
 #[no_mangle]
 pub unsafe extern "C" fn dirfd(_dirp: *mut u8) -> c_int {
@@ -350,4 +364,12 @@ pub unsafe extern "C" fn _getentropy_r(_reent: *mut u8, buf: *mut u8, len: usize
         unsafe { *buf.add(i) = (x.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 56) as u8 };
     }
     0
+}
+
+extern "C" {
+    fn __errno() -> *mut c_int;
+}
+
+fn set_errno(e: c_int) {
+    unsafe { *__errno() = e };
 }
