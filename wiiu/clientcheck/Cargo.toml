@@ -1,0 +1,16 @@
+[package]
+name = "clientcheck"
+version = "0.1.0"
+edition = "2021"
+description = "Builds the real game (horizon-client) for the Wii U target, to find what still needs porting"
+
+[workspace]
+
+[dependencies]
+horizon-client = { path = "../../crates/horizon-client", default-features = false }
+
+[patch.crates-io]
+wgpu-hal = { path = "../../third_party/wgpu-hal" }
+naga = { path = "../../third_party/naga" }
+libmimalloc-sys = { path = "../../third_party/libmimalloc-sys" }
+winit = { path = "../../third_party/winit" }
