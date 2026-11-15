@@ -20,8 +20,23 @@ struct Camera {
     pitch: f32,
 }
 
+/// Debug aid: every two seconds report where the main thread was last descheduled (pc, lr, sp), to find a spin.
+fn watchdog() {
+    let main = unsafe { OSGetCurrentThread() } as usize;
+    std::thread::spawn(move || {
+        for _ in 0..8 {
+            unsafe { OSSleepTicks(124_000_000) };
+            let t = main as *const OSThread;
+            unsafe {
+                OSReport(c"WATCHDOG main pc=%08x lr=%08x sp=%08x\n".as_ptr(), (*t).context.srr0, (*t).context.lr, (*t).context.gpr[1]);
+            }
+        }
+    });
+}
+
 fn main() {
     println!("horizon-wiiu: start");
+    watchdog();
     unsafe {
         WHBProcInit();
         VPADInit();
