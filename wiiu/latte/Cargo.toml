@@ -1,0 +1,9 @@
+[package]
+name = "latte"
+version = "0.1.0"
+edition = "2021"
+description = "Encoder for the Wii U GPU's (Latte, R700-family) shader instructions: control flow, ALU and texture clauses"
+
+[workspace]
+
+[dependencies]
