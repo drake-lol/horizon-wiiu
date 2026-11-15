@@ -144,7 +144,7 @@ impl Game {
             net::Event::Spawn(p) => {
                 if !self.spawned {
                     let (ox, oz) = ((p[0].floor() as i32).div_euclid(16) * 16 - 8 * 16, (p[2].floor() as i32).div_euclid(16) * 16 - 8 * 16);
-                    let oy = ((p[1].floor() as i32) - 32).div_euclid(16) * 16;
+                    let oy = ((p[1].floor() as i32) - 100).div_euclid(16) * 16;
                     self.origin = [ox, oy, oz];
                     self.world.y0 = oy;
                     self.player = Player::new([(p[0] - ox as f64) as f32, (p[1] - oy as f64) as f32, (p[2] - oz as f64) as f32]);
@@ -239,7 +239,7 @@ fn main() {
     let ok = gfx.set_texture(loaded.atlas_width as u32, loaded.atlas_height as u32, &loaded.rgba);
     println!("horizon-wiiu: atlas {}x{} ({} block types) -> {ok}", loaded.atlas_width, loaded.atlas_height, loaded.types.list.len());
     let types = loaded.types;
-    let world = if net.is_some() { world::World::empty(256, 96, 256, 0, types.clone()) } else { loader::load(types.clone()).unwrap_or_else(|| world::World::generate(types.clone())) };
+    let world = if net.is_some() { world::World::empty(256, 128, 256, 0, types.clone()) } else { loader::load(types.clone()).unwrap_or_else(|| world::World::generate(types.clone())) };
     println!("horizon-wiiu: world {}x{}x{} (y0 {})", world.sx, world.sy, world.sz, world.y0);
 
     let (cw, cd) = (world.sx / world::CHUNK, world.sz / world::CHUNK);
