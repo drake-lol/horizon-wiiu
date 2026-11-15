@@ -161,7 +161,7 @@ pub fn join(addr: SocketAddr, name: &str, view_distance: u8) -> Result<Net, Stri
 
     // configuration
     use ids::configuration::clientbound as cb;
-    shared.send(&configuration::Serverbound::ClientInformation(configuration::ClientInformation::new(view_distance as i32)).encode()).map_err(err)?;
+    shared.send(&configuration::Serverbound::ClientInformation(configuration::ClientInformation::new(view_distance as i8)).encode()).map_err(err)?;
     let mut w = Writer::new();
     w.string("horizon");
     shared
