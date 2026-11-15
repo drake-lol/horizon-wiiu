@@ -8,6 +8,9 @@ mod atlas;
 #[path = "../../horizon-wiiu/src/loader.rs"]
 #[allow(dead_code)]
 mod loader;
+#[path = "../../horizon-wiiu/src/types.rs"]
+#[allow(dead_code)]
+mod types;
 #[path = "../../horizon-wiiu/src/world.rs"]
 #[allow(dead_code)]
 mod world;
@@ -48,10 +51,10 @@ fn main() {
     if dir == "--mesh" { mesh_check(); return; }
     if dir == "--load" {
         let path = std::env::args().nth(2).expect("--load <r.X.Z.mca>");
-        let w = loader::load_region(&path, 0, 0).expect("load failed");
+        let w = loader::load_region(&path, 0, 0, types::Types::builtin().types).expect("load failed");
         let mut counts = std::collections::BTreeMap::new();
         for y in 0..w.sy as i32 { for z in 0..w.sz as i32 { for x in 0..w.sx as i32 {
-            *counts.entry(format!("{}", w.get(x, y, z) as u8)).or_insert(0usize) += 1;
+            *counts.entry(format!("{}", w.get(x, y, z))).or_insert(0usize) += 1;
         } } }
         println!("loaded {}x{}x{} y0={}: block-id counts {:?}", w.sx, w.sy, w.sz, w.y0, counts);
         return;
@@ -59,7 +62,7 @@ fn main() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = std::path::Path::new(&dir).join("r.0.0.mca");
     let _ = std::fs::remove_file(&path);
-    let world = world::World::generate();
+    let world = world::World::generate(types::Types::builtin().types);
     let mut writer = RegionWriter::create(&path).unwrap();
     for cz in 0..8i32 {
         for cx in 0..8i32 {
@@ -69,7 +72,7 @@ fn main() {
                 for y in 0..16 {
                     for z in 0..16 {
                         for x in 0..16 {
-                            let b = world.get(cx * 16 + x, sy * 16 + y, cz * 16 + z);
+                            let b = world::Block::from_u8(world.get(cx * 16 + x, sy * 16 + y, cz * 16 + z) as u8);
                             if b != world::Block::Air {
                                 let idx = BlockPos::new(x, y, z).section_index();
                                 container.set(idx, block_tag(b)).unwrap();
@@ -105,7 +108,7 @@ fn main() {
 
 #[allow(dead_code)]
 fn mesh_check() {
-    let world = world::World::generate();
+    let world = world::World::generate(types::Types::builtin().types);
     let t = std::time::Instant::now();
     let v = world.mesh_chunk(0, 0);
     println!("mesh 0,0: {} verts in {:?}", v.len(), t.elapsed());

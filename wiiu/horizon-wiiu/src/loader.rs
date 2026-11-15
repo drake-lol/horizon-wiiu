@@ -2,6 +2,7 @@
 //! through horizon-world's region and chunk readers. Looks for `HORIZON_WORLD`, then the SD card's
 //! `/vol/external01/horizon/world/region`, then a region embedded at build time.
 
+use crate::types::Types;
 use crate::world::{Block, World, CHUNK};
 use horizon_core::position::ChunkPos;
 use horizon_world::chunk::{BlockState, PalettedContainer};
@@ -16,7 +17,7 @@ const MAX_CHUNKS: i32 = 8;
 const MAX_HEIGHT: usize = 128;
 
 /// Plants, partial blocks and other things a plain cube would draw wrongly.
-fn not_a_cube(name: &str) -> bool {
+pub fn not_a_cube(name: &str) -> bool {
     const SKIP: &[&str] = &[
         "air", "grass", "fern", "flower", "sapling", "vine", "kelp", "seagrass", "bush", "torch", "rail", "carpet", "door", "fence",
         "wall", "pane", "bars", "ladder", "sign", "button", "plate", "lever", "slab", "stairs", "cobweb", "fire", "banner", "bed",
@@ -83,21 +84,21 @@ fn region_files(dir: &str) -> Vec<(i32, i32, String)> {
     out
 }
 
-pub fn load() -> Option<World> {
+pub fn load(types: Types) -> Option<World> {
     let dirs = [std::env::var("HORIZON_WORLD").ok(), Some("/vol/external01/horizon/world/region".to_string())];
     for dir in dirs.into_iter().flatten() {
         let files = region_files(&dir);
         println!("loader: {dir}: {} region file(s) ({:?})", files.len(), std::fs::read_dir(&dir).map(|_| "ok").map_err(|e| e.to_string()));
         if let Some((rx, rz, path)) = files.first() {
             println!("loader: reading {path}");
-            return load_region(path, *rx, *rz);
+            return load_region(path, *rx, *rz, types);
         }
     }
     let _ = EMBEDDED;
     None
 }
 
-pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
+pub fn load_region(path: &str, rx: i32, rz: i32, types: Types) -> Option<World> {
     let mut region = RegionFile::open(path).ok()?;
     // pass 1: find which chunks exist and the lowest / highest non-air sections
     let mut chunks = Vec::new();
@@ -146,7 +147,7 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
         return None;
     }
     let sy = (((hi - lo + 1) * 16) as usize).min(MAX_HEIGHT);
-    let mut world = World::empty(MAX_CHUNKS as usize * CHUNK, sy, MAX_CHUNKS as usize * CHUNK, lo * 16);
+    let mut world = World::empty(MAX_CHUNKS as usize * CHUNK, sy, MAX_CHUNKS as usize * CHUNK, lo * 16, types);
     let mut names: HashMap<usize, Block> = HashMap::new();
     for (cx, cz, root) in &chunks {
         let Some(Tag::List(sections)) = root.tag.get("sections") else { continue };
@@ -168,7 +169,7 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
                 let (x, yy, z) = (i & 15, (i >> 8) & 15, (i >> 4) & 15);
                 let wy = base_y as usize + yy;
                 if wy < sy {
-                    world.set(*cx as usize * CHUNK + x, wy, *cz as usize * CHUNK + z, block);
+                    world.set(*cx as usize * CHUNK + x, wy, *cz as usize * CHUNK + z, block as u16);
                 }
             }
         }

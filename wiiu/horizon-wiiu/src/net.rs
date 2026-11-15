@@ -69,8 +69,8 @@ pub enum Event {
     /// The first position the server put the player at.
     Spawn([f64; 3]),
     /// A chunk column: block ids per 16-high section from the lowest one (`4096` bytes each, y-major).
-    Chunk { x: i32, z: i32, min_y: i32, sections: Vec<Vec<u8>> },
-    Block { pos: [i32; 3], block: u8 },
+    Chunk { x: i32, z: i32, min_y: i32, sections: Vec<Vec<u16>> },
+    Block { pos: [i32; 3], block: u16 },
     Closed(String),
 }
 
@@ -147,9 +147,12 @@ pub fn server_address() -> SocketAddr {
         .unwrap_or_else(|| "127.0.0.1:25565".parse().unwrap())
 }
 
-fn load_states() -> Vec<u8> {
+/// Block state id -> block type id: `HZS2` (u16 per state, from mkatlas) or the older `HZST` (one placeholder block
+/// byte per state, from mkstates).
+fn load_states() -> Vec<u16> {
     match std::fs::read("/vol/external01/horizon/states.bin") {
-        Ok(b) if b.len() >= 8 && &b[..4] == b"HZST" => b[8..].to_vec(),
+        Ok(b) if b.len() >= 8 && &b[..4] == b"HZS2" => b[8..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect(),
+        Ok(b) if b.len() >= 8 && &b[..4] == b"HZST" => b[8..].iter().map(|&v| v as u16).collect(),
         _ => Vec::new(),
     }
 }
@@ -225,7 +228,7 @@ pub fn join(addr: SocketAddr, name: &str, view_distance: u8) -> Result<Net, Stri
     Ok(Net { events: rx, shared })
 }
 
-fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u8, states: Vec<u8>, tx: Sender<Event>) {
+fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u8, states: Vec<u16>, tx: Sender<Event>) {
     use ids::play::clientbound as cb;
     use ids::play::serverbound as sb;
     let mut dimension = dynamic.dimension(0);
@@ -313,7 +316,7 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
             }
             cb::BLOCK_UPDATE => {
                 if let Ok(play::Clientbound::BlockUpdate(p)) = play::Clientbound::decode(id, &body) {
-                    let b = states.get(p.state as usize).copied().unwrap_or(1);
+                    let b = states.get(p.state as usize).copied().unwrap_or(1u16);
                     let _ = tx.send(Event::Block { pos: p.pos, block: b });
                 }
                 Ok(())
@@ -331,8 +334,8 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
 }
 
 /// One section's block ids for the viewer, from its paletted states.
-fn section_blocks(s: &Section, states: &[u8]) -> Vec<u8> {
-    let mut out = vec![0u8; 4096];
+fn section_blocks(s: &Section, states: &[u16]) -> Vec<u16> {
+    let mut out = vec![0u16; 4096];
     if s.non_empty == 0 {
         return out;
     }

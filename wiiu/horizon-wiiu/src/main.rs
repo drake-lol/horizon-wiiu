@@ -10,6 +10,7 @@ mod loader;
 mod math;
 mod net;
 mod player;
+mod types;
 mod world;
 
 use core::mem::zeroed;
@@ -77,7 +78,7 @@ impl Game {
         }
     }
 
-    fn edit(&mut self, pos: [i32; 3], block: world::Block) {
+    fn edit(&mut self, pos: [i32; 3], block: u16) {
         if pos[0] < 0 || pos[1] < 0 || pos[2] < 0 {
             return;
         }
@@ -88,7 +89,7 @@ impl Game {
     fn break_block(&mut self) {
         let p = &self.player;
         if let Some((cell, _)) = player::raycast(&self.world, p.eye(), p.forward_vec(), player::REACH) {
-            self.edit(cell, world::Block::Air);
+            self.edit(cell, 0);
         }
     }
 
@@ -100,13 +101,14 @@ impl Game {
             let (px, py, pz) = (self.player.pos[0], self.player.pos[1], self.player.pos[2]);
             let inside = (at[0] as f32 + 0.5 - px).abs() < 0.8 && (at[2] as f32 + 0.5 - pz).abs() < 0.8 && (at[1] as f32 + 0.5 - py - 0.9).abs() < 1.4;
             if !inside && normal != [0, 0, 0] {
-                self.edit(at, hud::HOTBAR[self.selected]);
+                let t = self.world.types.hotbar[self.selected];
+                self.edit(at, t);
             }
         }
     }
 
     /// Put a received chunk column into the window and queue its meshes.
-    fn apply_chunk(&mut self, x: i32, z: i32, min_y: i32, sections: &[Vec<u8>]) {
+    fn apply_chunk(&mut self, x: i32, z: i32, min_y: i32, sections: &[Vec<u16>]) {
         let (cx, cz) = (x - self.origin[0].div_euclid(16), z - self.origin[2].div_euclid(16));
         let (nx, nz) = (self.world.sx as i32 / 16, self.world.sz as i32 / 16);
         if cx < 0 || cz < 0 || cx >= nx || cz >= nz {
@@ -121,7 +123,7 @@ impl Game {
             for (i, &b) in sec.iter().enumerate() {
                 let wy = base + ((i >> 8) & 15) as i32;
                 if wy >= 0 && wy < sy {
-                    self.world.set((cx * 16) as usize + (i & 15), wy as usize, (cz * 16) as usize + ((i >> 4) & 15), world::Block::from_u8(b));
+                    self.world.set((cx * 16) as usize + (i & 15), wy as usize, (cz * 16) as usize + ((i >> 4) & 15), b);
                 }
             }
         }
@@ -163,7 +165,7 @@ impl Game {
                 if self.spawned {
                     let (lx, ly, lz) = (pos[0] - self.origin[0], pos[1] - self.origin[1], pos[2] - self.origin[2]);
                     if lx >= 0 && ly >= 0 && lz >= 0 && (lx as usize) < self.world.sx && (ly as usize) < self.world.sy && (lz as usize) < self.world.sz {
-                        self.world.set(lx as usize, ly as usize, lz as usize, world::Block::from_u8(block));
+                        self.world.set(lx as usize, ly as usize, lz as usize, block);
                         self.mark_dirty(lx, lz);
                     }
                 }
@@ -216,9 +218,6 @@ fn main() {
         println!("horizon-wiiu: GX2 init failed");
         return;
     };
-    let ok = gfx.set_texture(atlas::WIDTH as u32, atlas::HEIGHT as u32, &atlas::build());
-    println!("horizon-wiiu: atlas texture -> {ok}");
-
     // The real game first: join a Horizon server; with none, the offline viewer world.
     let net = match net::join(net::server_address(), "WiiU", 6) {
         Ok(n) => {
@@ -230,7 +229,12 @@ fn main() {
             None
         }
     };
-    let world = if net.is_some() { world::World::empty(256, 96, 256, 0) } else { loader::load().unwrap_or_else(world::World::generate) };
+    // The player's real textures and block types from the SD card when joined; else the placeholders.
+    let loaded = if net.is_some() { types::Types::from_sd().unwrap_or_else(types::Types::builtin) } else { types::Types::builtin() };
+    let ok = gfx.set_texture(loaded.atlas_width as u32, loaded.atlas_height as u32, &loaded.rgba);
+    println!("horizon-wiiu: atlas {}x{} ({} block types) -> {ok}", loaded.atlas_width, loaded.atlas_height, loaded.types.list.len());
+    let types = loaded.types;
+    let world = if net.is_some() { world::World::empty(256, 96, 256, 0, types.clone()) } else { loader::load(types.clone()).unwrap_or_else(|| world::World::generate(types.clone())) };
     println!("horizon-wiiu: world {}x{}x{} (y0 {})", world.sx, world.sy, world.sz, world.y0);
 
     let (cw, cd) = (world.sx / world::CHUNK, world.sz / world::CHUNK);
@@ -328,7 +332,7 @@ fn main() {
         let proj = math::perspective(FOV, 16.0 / 9.0, 0.1, 400.0);
         let view = math::view(game.player.eye(), game.player.yaw, game.player.pitch);
         let mvp = math::mul(&proj, &view);
-        gfx.set_hud(&hud::build(game.selected));
+        gfx.set_hud(&hud::build(game.selected, &game.world.types));
         let ortho = hud::ortho();
 
         gfx.begin_frame();

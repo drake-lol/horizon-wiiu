@@ -51,7 +51,7 @@ impl Player {
         for y in y0..=y1 {
             for z in z0..=z1 {
                 for x in x0..=x1 {
-                    if world.get(x, y, z).solid() {
+                    if world.solid_at(x, y, z) {
                         return true;
                     }
                 }
@@ -122,7 +122,7 @@ pub fn raycast(world: &World, origin: [f32; 3], dir: [f32; 3], reach: f32) -> Op
     }
     let mut normal = [0i32; 3];
     loop {
-        if world.get(cell[0], cell[1], cell[2]).solid() {
+        if world.solid_at(cell[0], cell[1], cell[2]) {
             return Some((cell, normal));
         }
         let axis = if t_max[0] < t_max[1] && t_max[0] < t_max[2] {

@@ -9,6 +9,9 @@ mod atlas;
 #[path = "../../horizon-wiiu/src/loader.rs"]
 #[allow(dead_code)]
 mod loader;
+#[path = "../../horizon-wiiu/src/types.rs"]
+#[allow(dead_code)]
+mod types;
 #[path = "../../horizon-wiiu/src/world.rs"]
 #[allow(dead_code)]
 mod world;

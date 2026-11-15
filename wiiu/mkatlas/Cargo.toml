@@ -1,0 +1,12 @@
+[package]
+name = "mkatlas"
+version = "0.1.0"
+edition = "2021"
+description = "Host tool: pack the player's own prepared block textures into an atlas for the Wii U client"
+
+[workspace]
+
+[dependencies]
+horizon-world = { path = "../../crates/horizon-world" }
+horizon-core = { path = "../../crates/horizon-core" }
+png = "0.17"

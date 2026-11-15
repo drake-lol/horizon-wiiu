@@ -1,6 +1,8 @@
 //! A small voxel world and its mesher. The terrain here is procedural; a loader for Minecraft region
 //! files replaces `generate` once the engine crates are linked in.
 
+use crate::types::{Types, LIQUID, OPAQUE, TINT_FOLIAGE, TINT_TOP, TINT_WATER};
+#[allow(unused_imports)]
 use crate::atlas;
 
 pub const SIZE_X: usize = 128;
@@ -54,13 +56,8 @@ impl Block {
         !matches!(self, Block::Air | Block::Water | Block::Lava)
     }
 
-    /// The tile shown for the block in the hotbar.
-    pub fn icon_tile(self) -> usize {
-        self.tile(true, false)
-    }
-
-    /// The atlas tile for a face: `up` is +Y, `down` is -Y, anything else a side.
-    fn tile(self, up: bool, down: bool) -> usize {
+    /// The placeholder atlas tile for a face: `up` is +Y, `down` is -Y, anything else a side.
+    pub fn tile_for(self, up: bool, down: bool) -> usize {
         match self {
             Block::Air | Block::Stone => atlas::STONE,
             Block::Dirt => atlas::DIRT,
@@ -93,7 +90,8 @@ pub struct Vertex {
 }
 
 pub struct World {
-    blocks: Vec<Block>,
+    blocks: Vec<u16>,
+    pub types: Types,
     pub sx: usize,
     pub sy: usize,
     pub sz: usize,
@@ -144,11 +142,12 @@ fn height_at(x: usize, z: usize) -> usize {
 }
 
 impl World {
-    pub fn empty(sx: usize, sy: usize, sz: usize, y0: i32) -> World {
-        World { blocks: vec![Block::Air; sx * sy * sz], sx, sy, sz, y0 }
+    pub fn empty(sx: usize, sy: usize, sz: usize, y0: i32, types: Types) -> World {
+        World { blocks: vec![0u16; sx * sy * sz], types, sx, sy, sz, y0 }
     }
 
-    pub fn set(&mut self, x: usize, y: usize, z: usize, b: Block) {
+    /// Store block type `b` (an index into `types`).
+    pub fn set(&mut self, x: usize, y: usize, z: usize, b: u16) {
         let i = (y * self.sz + z) * self.sx + x;
         if let Some(slot) = self.blocks.get_mut(i) {
             *slot = b;
@@ -156,7 +155,7 @@ impl World {
     }
 
     #[inline(never)]
-    pub fn generate() -> World {
+    pub fn generate(types: Types) -> World {
         let mut blocks = vec![Block::Air; SIZE_X * SIZE_Y * SIZE_Z];
         let idx = |x: usize, y: usize, z: usize| (y * SIZE_Z + z) * SIZE_X + x;
         for z in 0..SIZE_Z {
@@ -200,22 +199,27 @@ impl World {
                 }
             }
         }
-        World { blocks, sx: SIZE_X, sy: SIZE_Y, sz: SIZE_Z, y0: 0 }
+        World { blocks: blocks.iter().map(|b| *b as u16).collect(), types, sx: SIZE_X, sy: SIZE_Y, sz: SIZE_Z, y0: 0 }
     }
 
     #[inline(never)]
-    pub fn get(&self, x: i32, y: i32, z: i32) -> Block {
+    pub fn get(&self, x: i32, y: i32, z: i32) -> u16 {
         if x < 0 || z < 0 || y < 0 || x >= self.sx as i32 || z >= self.sz as i32 || y >= self.sy as i32 {
-            return Block::Air;
+            return 0;
         }
         // `.get`, not indexing: on this target the indexed form of this expression, with runtime dimensions,
         // hung in the first meshed layer (see wiiu/README.md, "Known gaps").
         let i = (y as usize * self.sz + z as usize) * self.sx + x as usize;
-        self.blocks.get(i).copied().unwrap_or(Block::Air)
+        self.blocks.get(i).copied().unwrap_or(0)
+    }
+
+    /// A block the player cannot walk through: a full cube that is not a liquid.
+    pub fn solid_at(&self, x: i32, y: i32, z: i32) -> bool {
+        self.types.opaque(self.get(x, y, z))
     }
 
     pub fn surface(&self, x: usize, z: usize) -> usize {
-        (0..self.sy).rev().find(|&y| self.get(x as i32, y as i32, z as i32).solid()).unwrap_or(0)
+        (0..self.sy).rev().find(|&y| self.solid_at(x as i32, y as i32, z as i32)).unwrap_or(0)
     }
 
     /// Faces of the 16x16 column `(cx, cz)` as GX2 quads (four vertices each, counter-clockwise seen from outside).
@@ -235,19 +239,39 @@ impl World {
             for z in (cz * CHUNK) as i32..((cz + 1) * CHUNK) as i32 {
                 for x in (cx * CHUNK) as i32..((cx + 1) * CHUNK) as i32 {
                     let b = self.get(x, y, z);
-                    if b == Block::Air {
+                    if b == 0 {
                         continue;
                     }
+                    let info = self.types.info(b);
+                    if info.top == 0 && info.side == 0 && info.bottom == 0 && info.flags == 0 {
+                        continue;
+                    }
+                    let liquid = info.flags & LIQUID != 0;
                     let tint = 0.94 + 0.12 * hash(x * 31 + y, z, 5);
                     for (n, o, u, v, shade) in FACES.iter() {
                         let nb = self.get(x + n[0], y + n[1], z + n[2]);
-                        let visible = if b == Block::Water { nb == Block::Air } else { !nb.solid() };
+                        // hidden behind an opaque block, or inside the same liquid
+                        let visible = nb == 0 || (!self.types.opaque(nb) && !(liquid && self.types.liquid(nb)));
                         if !visible {
                             continue;
                         }
-                        let k = (shade * tint * 255.0).min(255.0) as u8;
-                        let color = [k, k, k, 255];
-                        let (u0, v0, su, sv) = atlas::uv_rect(b.tile(n[1] == 1, n[1] == -1));
+                        let tile = if n[1] == 1 { info.top } else if n[1] == -1 { info.bottom } else { info.side } as usize;
+                        let k = shade * tint;
+                        let mut rgb = [k, k, k];
+                        let tinted: Option<[f32; 3]> = if info.flags & TINT_WATER != 0 {
+                            Some([0.25, 0.46, 0.89])
+                        } else if info.flags & TINT_FOLIAGE != 0 {
+                            Some([0.47, 0.67, 0.18])
+                        } else if info.flags & TINT_TOP != 0 && n[1] == 1 {
+                            Some([0.57, 0.74, 0.35])
+                        } else {
+                            None
+                        };
+                        if let Some(t) = tinted {
+                            rgb = [k * t[0], k * t[1], k * t[2]];
+                        }
+                        let color = [(rgb[0] * 255.0).min(255.0) as u8, (rgb[1] * 255.0).min(255.0) as u8, (rgb[2] * 255.0).min(255.0) as u8, 255];
+                        let (u0, v0, su, sv) = atlas::uv_rect(tile);
                         // which of the quad's two axes runs up the face
                         let u_vertical = u[1] != 0.0 && v[1] == 0.0;
                         let p = [x as f32 + o[0], y as f32 + o[1], z as f32 + o[2]];

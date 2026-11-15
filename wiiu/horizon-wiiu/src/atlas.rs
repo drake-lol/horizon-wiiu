@@ -26,6 +26,26 @@ pub const BEDROCK: usize = 15;
 /// Solid white, tinted by vertex colour for the HUD.
 pub const WHITE: usize = 16;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+// Geometry of the atlas in use: the placeholder (4 tiles per row) or the real one (64 per row, any height).
+static PER_ROW: AtomicUsize = AtomicUsize::new(TILES_PER_ROW);
+static ATLAS_W: AtomicUsize = AtomicUsize::new(WIDTH);
+static ATLAS_H: AtomicUsize = AtomicUsize::new(HEIGHT);
+static WHITE_TILE: AtomicUsize = AtomicUsize::new(WHITE);
+
+/// The solid white tile (HUD quads are tinted by vertex colour).
+pub fn white() -> usize {
+    WHITE_TILE.load(Ordering::Relaxed)
+}
+
+pub fn set_geometry(per_row: usize, width: usize, height: usize, white: usize) {
+    WHITE_TILE.store(white, Ordering::Relaxed);
+    PER_ROW.store(per_row, Ordering::Relaxed);
+    ATLAS_W.store(width, Ordering::Relaxed);
+    ATLAS_H.store(height, Ordering::Relaxed);
+}
+
 fn noise(tile: usize, x: usize, y: usize) -> f32 {
     let mut h = (tile as u32).wrapping_mul(0x9e37_79b9) ^ (x as u32).wrapping_mul(0x85eb_ca6b) ^ (y as u32).wrapping_mul(0xc2b2_ae35);
     h ^= h >> 15;
@@ -101,8 +121,10 @@ pub fn build() -> Vec<u8> {
 
 /// Texture coordinates of tile `tile`: (u0, v0, u size, v size), inset by half a texel against bleeding.
 pub fn uv_rect(tile: usize) -> (f32, f32, f32, f32) {
-    let (tx, ty) = (tile % TILES_PER_ROW, tile / TILES_PER_ROW);
-    let (tu, tv) = (1.0 / WIDTH as f32, 1.0 / HEIGHT as f32);
+    let per_row = PER_ROW.load(Ordering::Relaxed);
+    let (w, h) = (ATLAS_W.load(Ordering::Relaxed), ATLAS_H.load(Ordering::Relaxed));
+    let (tx, ty) = (tile % per_row, tile / per_row);
+    let (tu, tv) = (1.0 / w as f32, 1.0 / h as f32);
     (
         (tx * TILE) as f32 * tu + tu * 0.5,
         (ty * TILE) as f32 * tv + tv * 0.5,
