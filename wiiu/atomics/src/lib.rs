@@ -366,10 +366,6 @@ pub unsafe extern "C" fn _getentropy_r(_reent: *mut u8, buf: *mut u8, len: usize
     0
 }
 
-extern "C" {
-    fn __errno() -> *mut c_int;
-}
-
 fn set_errno(e: c_int) {
     unsafe { *__errno() = e };
 }
