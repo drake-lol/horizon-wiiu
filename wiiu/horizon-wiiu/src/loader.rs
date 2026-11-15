@@ -106,8 +106,24 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
     for cz in 0..MAX_CHUNKS {
         for cx in 0..MAX_CHUNKS {
             let pos = ChunkPos::new(rx * 32 + cx, rz * 32 + cz);
-            let Ok(Some(record)) = region.read(pos) else { continue };
-            let Ok(root) = record.nbt(Limits::default()) else { continue };
+            let record = match region.read(pos) {
+                Ok(Some(r)) => r,
+                Ok(None) => {
+                    println!("loader: chunk {cx},{cz}: absent");
+                    continue;
+                }
+                Err(e) => {
+                    println!("loader: chunk {cx},{cz}: read error {e}");
+                    continue;
+                }
+            };
+            let root = match record.nbt(Limits::default()) {
+                Ok(r) => r,
+                Err(e) => {
+                    println!("loader: chunk {cx},{cz}: nbt error {e} ({} compressed bytes)", record.compressed.len());
+                    continue;
+                }
+            };
             let Some(Tag::List(sections)) = root.tag.get("sections") else { continue };
             for s in sections {
                 let Some(Tag::Byte(y)) = s.get("Y") else { continue };
