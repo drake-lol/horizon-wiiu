@@ -1,0 +1,14 @@
+[package]
+name = "naga-latte"
+version = "0.1.0"
+edition = "2021"
+description = "naga IR to Latte (Wii U GPU) machine code, compiled on the console"
+
+[workspace]
+
+[dependencies]
+latte = { path = "../latte" }
+naga = { path = "../../third_party/naga", features = ["pipeline-constants"] }
+
+[dev-dependencies]
+naga = { path = "../../third_party/naga", features = ["wgsl-in"] }

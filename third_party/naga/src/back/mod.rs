@@ -24,7 +24,7 @@ pub mod spv;
 #[cfg(wgsl_out)]
 pub mod wgsl;
 
-#[cfg(any(hlsl_out, msl_out, spv_out, glsl_out))]
+#[cfg(pipeline_constants)]
 pub mod pipeline_constants;
 
 #[cfg(any(hlsl_out, glsl_out))]

@@ -27,28 +27,26 @@ fn op(src: Src) -> Operand {
 }
 
 fn mul(slot: u8, dst: (u8, u8), a: Src, b: Src) -> Alu {
-    Alu { slot, op: AluOp::Op2(Op2::Mul, [op(a), op(b)]), dst, write: true, clamp: false }
+    Alu::new(slot, AluOp::Op2(op::op2::MUL, [op(a), op(b)]), dst)
 }
 
-const XYZW: [Sel; 4] = [Sel::X, Sel::Y, Sel::Z, Sel::W];
+fn alu(groups: Vec<Group>) -> Cf {
+    Cf::Alu { kind: AluKind::Alu, groups, kcache: Default::default() }
+}
 
 #[test]
 fn cutout_pixel_shader() {
     let file = std::fs::read("tests/tex_cutout.gsh").unwrap();
     let want = program(&file, 7);
-    let mut g1: Group = (0..4).map(|c| mul(c, (0, c), Src::Gpr(0, c), Src::Gpr(1, c))).collect();
-    g1.iter_mut().for_each(|a| a.write = true);
+    let g1: Group = (0..4).map(|c| mul(c, (0, c), Src::Gpr(0, c), Src::Gpr(1, c))).collect();
     let g2: Group = vec![Alu {
-        slot: 0,
-        op: AluOp::Op2(Op2::KillGt, [op(Src::Lit(0.5f32.to_bits())), op(Src::Gpr(1, 3))]),
-        dst: (0, 0),
         write: false,
-        clamp: false,
+        ..Alu::new(0, AluOp::Op2(op::op2::KILLGT, [op(Src::Lit(0.5f32.to_bits())), op(Src::Gpr(1, 3))]), (0, 0))
     }];
     let prog = vec![
         Cf::Tex {
             fetches: vec![Tex {
-                inst: TEX_SAMPLE,
+                inst: op::tex::SAMPLE as u8,
                 dst: 1,
                 dst_sel: XYZW,
                 src: 1,
@@ -56,10 +54,12 @@ fn cutout_pixel_shader() {
                 normalized: true,
                 resource: 0,
                 sampler: 0,
+                offset: [0; 3],
+                lod_bias: 0,
             }],
             valid_pixel: true,
         },
-        Cf::Alu(vec![g1, g2]),
+        alu(vec![g1, g2]),
         Cf::Export { target: Target::Pixel(0), gpr: 0, sel: XYZW, done: true, barrier: true },
     ];
     compare(&to_bytes(&assemble(&prog)), &want);
@@ -69,12 +69,8 @@ fn cutout_pixel_shader() {
 fn mvp_vertex_shader() {
     let file = std::fs::read("tests/tex_cutout.gsh").unwrap();
     let want = program(&file, 5);
-    let madd = |slot: u8, dst: (u8, u8), a: Src, b: Src, c: Src| Alu {
-        slot,
-        op: AluOp::Op3(Op3::MulAdd, [op(a), op(b), op(c)]),
-        dst,
-        write: true,
-        clamp: false,
+    let madd = |slot: u8, dst: (u8, u8), a: Src, b: Src, c: Src| {
+        Alu::new(slot, AluOp::Op3(op::op3::MULADD, [op(a), op(b), op(c)]), dst)
     };
     let g0: Group = (0..4)
         .map(|c| Alu { write: false, ..mul(c, (0, c), Src::Gpr(1, 3), Src::Const(3, c)) })
@@ -84,7 +80,7 @@ fn mvp_vertex_shader() {
     let g3: Group = (0..4).map(|c| madd(c, (1, c), Src::Gpr(1, 0), Src::Const(0, c), Src::Pv(c))).collect();
     let prog = vec![
         Cf::CallFs { barrier: false },
-        Cf::Alu(vec![g0, g1, g2, g3]),
+        alu(vec![g0, g1, g2, g3]),
         Cf::Export { target: Target::Pos(0), gpr: 1, sel: XYZW, done: true, barrier: true },
         Cf::Export { target: Target::Param(0), gpr: 2, sel: XYZW, done: false, barrier: true },
         Cf::Export { target: Target::Param(1), gpr: 3, sel: XYZW, done: true, barrier: false },

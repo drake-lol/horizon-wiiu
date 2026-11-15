@@ -81,6 +81,7 @@ spv-out = ["dep:spirv"]
 stderr = ["codespan-reporting/std"]
 termcolor = ["codespan-reporting/termcolor"]
 wgsl-in = ["dep:unicode-ident"]
+pipeline-constants = []
 wgsl-out = []
 
 [lib]
