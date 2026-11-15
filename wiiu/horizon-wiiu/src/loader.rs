@@ -124,7 +124,13 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
                     continue;
                 }
             };
-            let Some(Tag::List(sections)) = root.tag.get("sections") else { continue };
+            let Some(Tag::List(sections)) = root.tag.get("sections") else {
+                println!("loader: chunk {cx},{cz}: no sections list ({:?})", root.tag.id());
+                continue;
+            };
+            if cx < 2 && cz < 2 {
+                println!("loader: chunk {cx},{cz}: {} section(s), {} compressed bytes", sections.len(), record.compressed.len());
+            }
             for s in sections {
                 let Some(Tag::Byte(y)) = s.get("Y") else { continue };
                 let air_only = match s.get("block_states").and_then(|c| PalettedContainer::from_nbt(c, 4096, 4).ok()) {
