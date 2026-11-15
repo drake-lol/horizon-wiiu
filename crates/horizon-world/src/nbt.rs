@@ -2,8 +2,41 @@
 use std::collections::BTreeMap;
 
 /// Java strings can contain unpaired surrogates, which Rust UTF-8 strings cannot.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(not(target_vendor = "wiiu"), derive(PartialOrd, Ord))]
 pub struct JavaString(pub Vec<u16>);
+
+// On the Wii U the slice `Ord` of `Vec<u16>` returned wrong results (equal slices compared `Less`, different ones
+// `Equal`), which broke every compound lookup; an explicit loop with plain comparisons is correct there.
+#[cfg(target_vendor = "wiiu")]
+impl Ord for JavaString {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        let (a, b) = (&self.0, &other.0);
+        let n = if a.len() < b.len() { a.len() } else { b.len() };
+        for i in 0..n {
+            if a[i] < b[i] {
+                return Less;
+            }
+            if a[i] > b[i] {
+                return Greater;
+            }
+        }
+        if a.len() < b.len() {
+            Less
+        } else if a.len() > b.len() {
+            Greater
+        } else {
+            Equal
+        }
+    }
+}
+#[cfg(target_vendor = "wiiu")]
+impl PartialOrd for JavaString {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl From<&str> for JavaString {
     fn from(value: &str) -> Self {
