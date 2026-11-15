@@ -61,6 +61,8 @@ struct Game {
     spawned: bool,
     pending: Vec<net::Event>,
     verts_total: u64,
+    resent: u32,
+    forgotten: u32,
 }
 
 impl Game {
@@ -232,12 +234,15 @@ impl Game {
                     keep_s.push(if air { None } else { Some(s) });
                     keep_l.push(if air && l.iter().all(|&v| v == 15) { None } else { Some(l) });
                 }
-                self.cache.insert((x, z), Cached { min_y, sections: keep_s, light: keep_l });
+                if self.cache.insert((x, z), Cached { min_y, sections: keep_s, light: keep_l }).is_some() {
+                    self.resent += 1;
+                }
                 if self.spawned {
                     self.apply_cached(x, z);
                 }
             }
             net::Event::Forget { x, z } => {
+                self.forgotten += 1;
                 self.cache.remove(&(x, z));
                 let (cx, cz) = (x - self.origin[0].div_euclid(16), z - self.origin[2].div_euclid(16));
                 if self.spawned && cx >= 0 && cz >= 0 && (cx as usize) < self.world.sx / 16 && (cz as usize) < self.world.sz / 16 {
@@ -359,7 +364,7 @@ fn main() {
 
     let (sx, sz) = (world.sx / 2, world.sz / 2);
     let spawn = [sx as f32 + 0.5, world.surface(sx, sz) as f32 + 2.0, sz as f32 + 0.5];
-    let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0, origin: [0; 3], spawned: net.is_none(), pending: Vec::new(), verts_total: 0, cache: std::collections::HashMap::new() };
+    let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0, origin: [0; 3], spawned: net.is_none(), pending: Vec::new(), verts_total: 0, cache: std::collections::HashMap::new(), resent: 0, forgotten: 0 };
     let mut manual = false;
     let mut last_move = std::time::Instant::now();
     let mut loaded_at: Option<std::time::Instant> = None;
@@ -453,7 +458,7 @@ fn main() {
         game.frame += 1;
         if game.frame % 120 == 0 {
             let p = &game.player;
-            println!("horizon-wiiu: meshes {} verts_total {}", game.meshes.iter().flatten().count(), game.verts_total);
+            println!("horizon-wiiu: meshes {} verts_total {} cached {} resent {} forgotten {} loaded {} quiet {}", game.meshes.iter().flatten().count(), game.verts_total, game.cache.len(), game.resent, game.forgotten, net::loaded(), net::chunks_quiet(2000));
             println!("horizon-wiiu: frame {} pos ({}, {}, {}) dm ground={} broke={broke} placed={placed}", game.frame, (p.pos[0] * 10.0) as i64, (p.pos[1] * 10.0) as i64, (p.pos[2] * 10.0) as i64, p.on_ground);
         }
     }
