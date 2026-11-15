@@ -29,7 +29,10 @@ wiiuctl.py press ZR+B 500              # together, for 500 ms
 wiiuctl.py hold ZR && wiiuctl.py release ZR
 wiiuctl.py stick L 0 1 1000            # left stick up for a second (no ms: until `clear`)
 wiiuctl.py touch 427 240               # GamePad screen pixels (854 x 480)
-wiiuctl.py run ../horizon-real/target/powerpc-nintendo-wiiu/release/horizon-real.rpx
+wiiuctl.py deploy horizon-real.rpx           # FTP to SD:/wiiu/apps/horizon/ and start it (RPXLoader)
+wiiuctl.py runsd wiiu/apps/horizon/horizon-real.rpx   # start one already on the card
+wiiuctl.py fetch horizon/console.txt console.txt     # copy a file back
+wiiuctl.py run horizon-real.rpx               # through Aroma's Wiiload instead
 wiiuctl.py logs                        # console output while a program runs
 wiiuctl.py watch shots/                # a screenshot every 5 s
 wiiuctl.py menu | reboot | shutdown | launch <title id>   # reboot relaunches the OS and Aroma, no power cycle

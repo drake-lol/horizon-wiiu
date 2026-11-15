@@ -14,6 +14,7 @@
 //   CLEAR                         stop every injected input
 //   MENU                          back to the Wii U Menu
 //   LAUNCH <title id hex>         start a title
+//   RUNSD <path>                  start an .rpx/.wuhb on the SD card (path from the card's root), via Aroma's RPXLoader
 //   REBOOT                        restart the console
 //   SHUTDOWN                      power off
 //
@@ -24,6 +25,7 @@
 #include <wups.h>
 
 #include <coreinit/cache.h>
+#include <rpxloader/rpxloader.h>
 #include <coreinit/launch.h>
 #include <coreinit/memdefaultheap.h>
 #include <coreinit/time.h>
@@ -602,6 +604,19 @@ static bool handle(int fd, const std::vector<std::string> &w) {
         }
         reply(fd, "OK");
         SYSLaunchTitle(tid);
+        return false;
+    }
+    if (cmd == "RUNSD") {
+        std::string path = arg(1, "");
+        if (path.empty()) {
+            return reply(fd, "ERR RUNSD <path on the SD card>");
+        }
+        RPXLoaderStatus st = RPXLoader_InitLibrary();
+        if (st != RPX_LOADER_RESULT_SUCCESS) {
+            return reply(fd, std::string("ERR RPXLoader: ") + RPXLoader_GetStatusStr(st));
+        }
+        reply(fd, "OK");
+        st = RPXLoader_LaunchHomebrew(path.c_str());
         return false;
     }
     if (cmd == "REBOOT") {

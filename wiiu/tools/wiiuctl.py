@@ -193,11 +193,36 @@ class WiiU:
             s.sendall(argv)
         self.close()
 
-    def upload(self, local, remote_dir, name=None, user="anonymous", password=""):
-        """Copy a file to the console over FTP (Aroma's ftpiiu plugin)."""
+    def runsd(self, path):
+        """Start an .rpx/.wuhb already on the SD card; `path` from the card's root (wiiu/apps/x/x.rpx)."""
+        reply = self.command(f"RUNSD {path}")
+        self.close()
+        return reply
+
+    def deploy(self, local, sd_dir="wiiu/apps/horizon"):
+        """Copy an .rpx/.wuhb to the SD card over FTP and start it (no Wiiload needed)."""
+        self.upload(local, "/fs/vol/external01/" + sd_dir)
+        return self.runsd(f"{sd_dir}/{os.path.basename(local)}")
+
+    def fetch(self, remote, local, user="anonymous", password=""):
+        """Copy a file from the console over FTP; `remote` from the SD card's root."""
         with ftplib.FTP() as ftp:
             ftp.connect(self.host, 21, timeout=30)
             ftp.login(user, password)
+            with open(local, "wb") as f:
+                ftp.retrbinary(f"RETR /fs/vol/external01/{remote.lstrip('/')}", f.write)
+
+    def upload(self, local, remote_dir, name=None, user="anonymous", password=""):
+        """Copy a file to the console over FTP (Aroma's ftpiiu plugin), making the folder if needed."""
+        with ftplib.FTP() as ftp:
+            ftp.connect(self.host, 21, timeout=30)
+            ftp.login(user, password)
+            parts = remote_dir.strip("/").split("/")
+            for i in range(1, len(parts) + 1):
+                try:
+                    ftp.mkd("/" + "/".join(parts[:i]))
+                except ftplib.error_perm:
+                    pass
             ftp.cwd(remote_dir)
             with open(local, "rb") as f:
                 ftp.storbinary(f"STOR {name or os.path.basename(local)}", f)
@@ -270,6 +295,14 @@ def main():
     sub.add_parser("menu")
     s = sub.add_parser("launch")
     s.add_argument("title_id")
+    s = sub.add_parser("runsd", help="start an .rpx/.wuhb on the SD card")
+    s.add_argument("path", help="from the card's root, e.g. wiiu/apps/horizon/horizon-real.rpx")
+    s = sub.add_parser("deploy", help="copy an .rpx/.wuhb to the SD card over FTP and start it")
+    s.add_argument("file")
+    s.add_argument("--dir", default="wiiu/apps/horizon")
+    s = sub.add_parser("fetch", help="copy a file from the SD card")
+    s.add_argument("remote")
+    s.add_argument("local")
     sub.add_parser("reboot")
     sub.add_parser("shutdown")
     s = sub.add_parser("run")
@@ -316,6 +349,12 @@ def main():
         w.menu()
     elif a.cmd == "launch":
         w.launch(a.title_id)
+    elif a.cmd == "runsd":
+        print(w.runsd(a.path))
+    elif a.cmd == "deploy":
+        print(w.deploy(a.file, a.dir))
+    elif a.cmd == "fetch":
+        w.fetch(a.remote, a.local)
     elif a.cmd == "reboot":
         w.reboot()
     elif a.cmd == "shutdown":
