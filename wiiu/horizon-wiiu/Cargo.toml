@@ -13,6 +13,6 @@ wut-sys = { path = "../wut-sys" }
 wiiu-atomics = { path = "../atomics", features = ["skip-socket-init", "console-stdout", "trace-fatal"] }
 
 [profile.release]
-opt-level = 2
+opt-level = 3
 panic = "abort"
 debug = false

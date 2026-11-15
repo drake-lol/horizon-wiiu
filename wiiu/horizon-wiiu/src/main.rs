@@ -33,7 +33,7 @@ fn main() {
     let ok = gfx.set_texture(atlas::SIZE as u32, atlas::SIZE as u32, &atlas::build());
     println!("horizon-wiiu: atlas texture -> {ok}");
 
-    let world = if std::env::var("HW_NOLOAD").is_ok() || true { world::World::generate() } else { loader::load().unwrap_or_else(world::World::generate) };
+    let world = loader::load().unwrap_or_else(world::World::generate);
     println!("horizon-wiiu: world {}x{}x{} (y0 {})", world.sx, world.sy, world.sz, world.y0);
     let mut meshes = Vec::new();
     let mut quads = 0u32;

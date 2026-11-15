@@ -125,7 +125,9 @@ impl World {
 
     pub fn set(&mut self, x: usize, y: usize, z: usize, b: Block) {
         let i = (y * self.sz + z) * self.sx + x;
-        self.blocks[i] = b;
+        if let Some(slot) = self.blocks.get_mut(i) {
+            *slot = b;
+        }
     }
 
     pub fn generate() -> World {
@@ -179,7 +181,10 @@ impl World {
         if x < 0 || z < 0 || y < 0 || x >= self.sx as i32 || z >= self.sz as i32 || y >= self.sy as i32 {
             return Block::Air;
         }
-        self.blocks[(y as usize * self.sz + z as usize) * self.sx + x as usize]
+        // `.get`, not indexing: on this target the indexed form of this expression, with runtime dimensions,
+        // hung in the first meshed layer (see wiiu/README.md, "Known gaps").
+        let i = (y as usize * self.sz + z as usize) * self.sx + x as usize;
+        self.blocks.get(i).copied().unwrap_or(Block::Air)
     }
 
     pub fn surface(&self, x: usize, z: usize) -> usize {
