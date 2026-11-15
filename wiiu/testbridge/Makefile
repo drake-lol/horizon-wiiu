@@ -27,7 +27,7 @@ CXXFLAGS := $(CFLAGS) -std=c++20 -fno-exceptions
 ASFLAGS  := -g $(ARCH)
 LDFLAGS   = -g $(ARCH) $(RPXSPECS) -Wl,-Map,$(notdir $*.map) $(WUPSSPECS)
 
-LIBS     := -lwups -lmappedmemory -lwut
+LIBS     := -lwups -lwut
 LIBDIRS  := $(DEVKITPRO)/wums $(WUPS_ROOT) $(WUT_ROOT) $(WUT_ROOT)/usr
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))

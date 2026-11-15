@@ -47,7 +47,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
-#include <memory/mappedmemory.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -214,64 +213,32 @@ static std::string sShotError;
 static uint32_t sShotW = 0, sShotH = 0;
 static std::vector<uint8_t> sShotRgb;
 
-/// Copy the colour buffer (any tiling, any AA) into a linear surface and convert it to RGB.
-static void capture(const GX2ColorBuffer *cb) {
-    GX2Surface tmp{};
-    const GX2Surface *src = &cb->surface;
-    void *resolved        = nullptr;
-    if (cb->surface.aa != GX2_AA_MODE1X) {
-        tmp.dim       = GX2_SURFACE_DIM_TEXTURE_2D;
-        tmp.width     = cb->surface.width;
-        tmp.height    = cb->surface.height;
-        tmp.depth     = 1;
-        tmp.mipLevels = 1;
-        tmp.format    = cb->surface.format;
-        tmp.aa        = GX2_AA_MODE1X;
-        tmp.use       = GX2_SURFACE_USE_TEXTURE_COLOR_BUFFER_TV;
-        tmp.tileMode  = GX2_TILE_MODE_DEFAULT;
-        GX2CalcSurfaceSizeAndAlignment(&tmp);
-        resolved = MEMAllocFromMappedMemoryForGX2Ex(tmp.imageSize, tmp.alignment);
-        if (!resolved) {
-            sShotError = "out of memory resolving AA";
-            return;
-        }
-        tmp.image = resolved;
-        GX2ResolveAAColorBuffer(cb, &tmp, 0, 0);
-        src = &tmp;
-    }
-    GX2Surface lin{};
-    lin.dim       = GX2_SURFACE_DIM_TEXTURE_2D;
-    lin.width     = src->width;
-    lin.height    = src->height;
-    lin.depth     = 1;
-    lin.mipLevels = 1;
-    lin.format    = src->format;
-    lin.aa        = GX2_AA_MODE1X;
-    lin.use       = (GX2SurfaceUse) (GX2_SURFACE_USE_COLOR_BUFFER | GX2_SURFACE_USE_TEXTURE);
-    lin.tileMode  = GX2_TILE_MODE_LINEAR_ALIGNED;
-    GX2CalcSurfaceSizeAndAlignment(&lin);
-    void *image = MEMAllocFromMappedMemoryForGX2Ex(lin.imageSize, lin.alignment);
-    if (!image) {
-        if (resolved) {
-            MEMFreeToMappedMemory(resolved);
-        }
-        sShotError = "out of memory copying the frame";
+/// Read the frame last sent to the screen. The scan buffers are linear memory the CPU reads, so this asks no
+/// work of the GPU (an earlier version copied the colour buffer with GX2CopySurface, which hung the GPU on
+/// real consoles).
+static void capture(GX2ScanTarget target) {
+    GX2Texture tex{};
+    if (!GX2GetLastFrame(target, &tex) || !tex.surface.image) {
+        sShotError = "no frame presented yet";
         return;
     }
-    lin.image = image;
-    GX2Invalidate(GX2_INVALIDATE_MODE_CPU, image, lin.imageSize);
-    GX2CopySurface(src, src == &tmp ? 0 : cb->viewMip, src == &tmp ? 0 : cb->viewFirstSlice, &lin, 0, 0);
-    GX2Invalidate(GX2_INVALIDATE_MODE_COLOR_BUFFER, image, lin.imageSize);
-    GX2DrawDone();
-    DCInvalidateRange(image, lin.imageSize);
+    const GX2Surface &src = tex.surface;
+    if (src.tileMode != GX2_TILE_MODE_LINEAR_ALIGNED && src.tileMode != GX2_TILE_MODE_LINEAR_SPECIAL) {
+        char msg[64];
+        snprintf(msg, sizeof msg, "scan buffer tile mode %u not linear", (unsigned) src.tileMode);
+        sShotError = msg;
+        return;
+    }
+    uint32_t bytes = src.pitch * src.height * 4;
+    DCInvalidateRange(src.image, bytes);
 
-    uint32_t fmt   = lin.format & 0x3F;
+    uint32_t fmt   = src.format & 0x3F;
     uint32_t scale = sShotScale ? sShotScale : 1;
-    uint32_t w = lin.width / scale, h = lin.height / scale;
+    uint32_t w = src.width / scale, h = src.height / scale;
     sShotRgb.resize((size_t) w * h * 3);
-    const uint8_t *px = (const uint8_t *) image;
+    const uint8_t *px = (const uint8_t *) src.image;
     for (uint32_t y = 0; y < h; y++) {
-        const uint8_t *row = px + (size_t) (y * scale) * lin.pitch * 4;
+        const uint8_t *row = px + (size_t) (y * scale) * src.pitch * 4;
         uint8_t *out       = &sShotRgb[(size_t) y * w * 3];
         for (uint32_t x = 0; x < w; x++) {
             const uint8_t *p = row + (size_t) (x * scale) * 4;
@@ -294,12 +261,8 @@ static void capture(const GX2ColorBuffer *cb) {
     sShotH = h;
     if (fmt != 0x1A && fmt != 0x19) {
         char msg[64];
-        snprintf(msg, sizeof msg, "format %#x read as RGBA8", (unsigned) lin.format);
+        snprintf(msg, sizeof msg, "format %#x read as RGBA8", (unsigned) src.format);
         sShotError = msg; // a warning: the picture is still sent
-    }
-    MEMFreeToMappedMemory(image);
-    if (resolved) {
-        MEMFreeToMappedMemory(resolved);
     }
 }
 
@@ -308,7 +271,7 @@ DECL_FUNCTION(void, GX2CopyColorBufferToScanBuffer, const GX2ColorBuffer *colorB
         std::unique_lock<std::mutex> lock(sShotLock);
         if (sShotTarget != 0 && (sShotTarget & scanTarget) && colorBuffer) {
             sShotError.clear();
-            capture(colorBuffer);
+            capture((GX2ScanTarget) (sShotTarget & scanTarget));
             sShotTarget = 0;
             sShotReady  = true;
             sShotDone.notify_all();
