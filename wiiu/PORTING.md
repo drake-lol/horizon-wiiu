@@ -25,3 +25,23 @@ Goal: the real Horizon (Minecraft: Java Edition 26.3 in Rust) on the Wii U, not 
 6. **Real hardware**: everything so far was run only in Cemu.
 
 Steps 2-6 each need step 1's data to be tested for real.
+
+## Wii U launcher (sign in, download Minecraft): design and status
+Legal shape: the player signs in with their own Microsoft account (device-code flow: the console shows a code, the
+player enters it on a phone or PC), the launcher checks the account owns Java Edition, and Minecraft's files come
+straight from Mojang for that account. Nothing of Mojang's is shipped or redistributed by this repo.
+- **Client ID**: Horizon's rules forbid a fork using Horizon's Microsoft app ID (docs/forking.md). The Wii U launcher
+  needs its own Azure app registration (personal accounts, public client, device-code on) and Mojang's app-ID
+  approval (https://aka.ms/mce-reviewappid). Only the owner of that registration can do this. Make it configurable
+  (SD file / build-time variable) and refuse to start sign-in without one, as Horizon does.
+- **Flow** (docs/microsoft-account.md): device code -> token poll -> Xbox Live -> XSTS -> Minecraft login ->
+  entitlements -> profile; then Mojang's version manifest -> client jar and assets, written in the layout the official
+  launcher uses so that `horizon-launcher prepare --minecraft <folder>` / `horizon-prepare` can import them on a PC.
+- **Why preparation stays off-console**: `prepare` runs Java exporters over Mojang's jar; there is no JVM for the
+  Wii U. The prepared folder is the player's own derived data; copying it between their own devices (SD card, LAN) is
+  not redistribution.
+- **Networking status**: rustls + ring + ureq build for the Wii U target. In Cemu, `getaddrinfo`/`freeaddrinfo` are
+  unimplemented, and with wut's `socket_lib_init` running Cemu crashes in its own `nsysnet setsockopt` (probably
+  option-struct sizes: the libc crate's timeval/linger/socket constants are not the console's). A hosts-file resolver
+  (`/vol/external01/horizon/hosts.txt`) exists in `wiiu/nettest`. Real-hardware behaviour is unknown; the socket layer
+  should be written against wut's own nsysnet headers, not libc's, and tested on a console.
