@@ -35,6 +35,18 @@ pub struct Net {
 /// Set once `PlayerLoaded` has been sent: the server ignores a player's moves until then.
 static LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+static LAST_CHUNK_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+}
+
+/// No chunk has arrived for `ms`: the server has finished sending (and generating) the area around the player.
+pub fn chunks_quiet(ms: u64) -> bool {
+    LOADED.load(Ordering::SeqCst) && now_ms().saturating_sub(LAST_CHUNK_MS.load(Ordering::SeqCst)) >= ms
+}
+
 pub fn loaded() -> bool {
     LOADED.load(Ordering::SeqCst)
 }
@@ -290,6 +302,7 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
                     match p.chunk.sections(dimension.sections(), block_bits, biome_bits) {
                         Ok(secs) => {
                             chunks += 1;
+                            LAST_CHUNK_MS.store(now_ms(), Ordering::SeqCst);
                             let sections = secs.iter().map(|s| section_blocks(s, &states)).collect();
                             let _ = tx.send(Event::Chunk { x: p.x, z: p.z, min_y: dimension.min_y, sections });
                         }

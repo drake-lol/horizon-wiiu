@@ -304,7 +304,7 @@ fn main() {
         }
         // one position packet per 100 ms (two server ticks), starting a second after PlayerLoaded: a server still
         // generating its first chunks stalls its tick, and moves queued into one tick are a kick
-        let moving = loaded_at.is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(1000));
+        let moving = loaded_at.is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(1000)) && net::chunks_quiet(2000);
         if let (Some(n), true) = (&net, game.spawned && moving && last_move.elapsed() >= std::time::Duration::from_millis(100)) {
             last_move = std::time::Instant::now();
             let p = &game.player;
