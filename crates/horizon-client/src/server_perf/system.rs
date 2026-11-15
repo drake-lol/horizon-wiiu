@@ -7,12 +7,19 @@ use std::sync::OnceLock;
 use super::WorldCounts;
 
 /// The disk the game runs from, where its worlds are saved: used and total MiB.
+#[cfg(not(target_vendor = "wiiu"))]
 pub(super) fn disk_mb() -> Option<(u64, u64)> {
     const MIB: u64 = 1 << 20;
     let dir = std::env::current_dir().ok()?;
     let total = fs4::total_space(&dir).ok()?;
     let free = fs4::available_space(&dir).ok()?;
     Some((total.saturating_sub(free) / MIB, total / MIB))
+}
+
+/// The Wii U's SD card cannot be asked.
+#[cfg(target_vendor = "wiiu")]
+pub(super) fn disk_mb() -> Option<(u64, u64)> {
+    None
 }
 
 /// Reads the process and the machine for the health gauges; the CPU figures are rates since the last read.
