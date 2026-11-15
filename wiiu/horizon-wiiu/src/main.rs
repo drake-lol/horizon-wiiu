@@ -148,6 +148,7 @@ impl Game {
                     self.origin = [ox, oy, oz];
                     self.world.y0 = oy;
                     self.player = Player::new([(p[0] - ox as f64) as f32, (p[1] - oy as f64) as f32, (p[2] - oz as f64) as f32]);
+                    self.player.pitch = -0.5;
                     self.spawned = true;
                     println!("net: spawn at ({:.1}, {:.1}, {:.1}); window origin {:?}", p[0], p[1], p[2], self.origin);
                     for ev in std::mem::take(&mut self.pending) {
@@ -204,7 +205,7 @@ fn demo_input(frame: u32) -> (Input, bool, bool) {
         input.look_x = -0.35;
     }
     input.jump = frame % 75 == 0;
-    input.look_y = if frame < 20 { -0.2 } else { 0.0 };
+    input.look_y = 0.0;
     let break_now = frame % 40 == 20;
     let place_now = frame % 40 == 30;
     (input, break_now, place_now)
