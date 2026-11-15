@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 wiiu-atomics = { path = "../atomics", features = ["console-stdout", "trace-fatal"] }
-ureq = { version = "2", default-features = false, features = ["tls"] }
 
 [profile.release]
 opt-level = "s"

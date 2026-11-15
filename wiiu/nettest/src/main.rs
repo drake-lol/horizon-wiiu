@@ -1,42 +1,57 @@
+//! Socket smoke test: a Minecraft server-list ping to a numeric address, with no DNS and no socket options
+//! (Cemu's nsysnet lacks getaddrinfo and crashes in setsockopt).
 extern crate wiiu_atomics;
 
-use std::io::Read;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
 
-/// Host names from `/vol/external01/horizon/hosts.txt` ("name ip" per line) win over system DNS; Cemu has no
-/// working `getaddrinfo`, and a console on a bad DNS setting can be pointed at the right address by hand.
-struct HostsResolver;
-
-impl ureq::Resolver for HostsResolver {
-    fn resolve(&self, netloc: &str) -> std::io::Result<Vec<SocketAddr>> {
-        let (host, port) = netloc.rsplit_once(':').unwrap_or((netloc, "443"));
-        if let Ok(text) = std::fs::read_to_string("/vol/external01/horizon/hosts.txt") {
-            for line in text.lines() {
-                let mut parts = line.split_whitespace();
-                if let (Some(name), Some(ip)) = (parts.next(), parts.next()) {
-                    if name == host {
-                        if let Ok(addr) = format!("{ip}:{port}").parse::<SocketAddr>() {
-                            return Ok(vec![addr]);
-                        }
-                    }
-                }
-            }
+fn varint(mut v: u32, out: &mut Vec<u8>) {
+    loop {
+        let mut b = (v & 0x7f) as u8;
+        v >>= 7;
+        if v != 0 {
+            b |= 0x80;
         }
-        netloc.to_socket_addrs().map(|a| a.collect())
+        out.push(b);
+        if v == 0 {
+            break;
+        }
     }
+}
+
+fn packet(id: u32, body: &[u8]) -> Vec<u8> {
+    let mut inner = Vec::new();
+    varint(id, &mut inner);
+    inner.extend_from_slice(body);
+    let mut out = Vec::new();
+    varint(inner.len() as u32, &mut out);
+    out.extend(inner);
+    out
 }
 
 fn main() {
     println!("nettest: start");
-    let agent = ureq::AgentBuilder::new().resolver(HostsResolver).build();
-    let url = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
-    match agent.get(url).call() {
-        Ok(resp) => {
-            println!("nettest: HTTP {}", resp.status());
-            let mut body = String::new();
-            let n = resp.into_reader().take(4096).read_to_string(&mut body).unwrap_or(0);
-            println!("nettest: {n} bytes: {}", body.chars().take(120).collect::<String>());
+    let addr: SocketAddr = "127.0.0.1:25565".parse().unwrap();
+    let mut s = match TcpStream::connect(addr) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("nettest: connect failed: {e}");
+            return;
         }
-        Err(e) => println!("nettest: error: {e}"),
+    };
+    println!("nettest: connected");
+    // handshake: protocol 777 (as the game states it), host, port, next state 1 (status)
+    let mut hs = Vec::new();
+    varint(777, &mut hs);
+    varint(9, &mut hs);
+    hs.extend_from_slice(b"127.0.0.1");
+    hs.extend_from_slice(&25565u16.to_be_bytes());
+    varint(1, &mut hs);
+    let _ = s.write_all(&packet(0, &hs));
+    let _ = s.write_all(&packet(0, &[]));
+    let mut buf = vec![0u8; 2048];
+    match s.read(&mut buf) {
+        Ok(n) => println!("nettest: got {n} bytes: {}", String::from_utf8_lossy(&buf[..n.min(160)]).replace('\u{0}', ".")),
+        Err(e) => println!("nettest: read failed: {e}"),
     }
 }

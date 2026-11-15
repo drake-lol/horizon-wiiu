@@ -1,0 +1,11 @@
+[package]
+name = "mkstates"
+version = "0.1.0"
+edition = "2021"
+description = "Host tool: compact the prepared block registry (facts.json) into states.bin for the Wii U client"
+
+[workspace]
+
+[dependencies]
+horizon-world = { path = "../../crates/horizon-world" }
+horizon-core = { path = "../../crates/horizon-core" }
