@@ -130,6 +130,7 @@ impl World {
         }
     }
 
+    #[inline(never)]
     pub fn generate() -> World {
         let mut blocks = vec![Block::Air; SIZE_X * SIZE_Y * SIZE_Z];
         let idx = |x: usize, y: usize, z: usize| (y * SIZE_Z + z) * SIZE_X + x;
@@ -193,6 +194,7 @@ impl World {
     }
 
     /// Faces of the 16x16 column `(cx, cz)` as GX2 quads (four vertices each, counter-clockwise seen from outside).
+    #[inline(never)]
     pub fn mesh_chunk(&self, cx: usize, cz: usize) -> Vec<Vertex> {
         // (neighbour offset, origin, u, v, brightness)
         const FACES: [([i32; 3], [f32; 3], [f32; 3], [f32; 3], f32); 6] = [
