@@ -11,7 +11,7 @@ horizon-world = { path = "../../crates/horizon-world" }
 horizon-core = { path = "../../crates/horizon-core" }
 horizon-protocol = { path = "../../crates/horizon-protocol" }
 wut-sys = { path = "../wut-sys" }
-wiiu-atomics = { path = "../atomics", features = ["skip-socket-init", "console-stdout", "trace-fatal"] }
+wiiu-atomics = { path = "../atomics", features = ["console-stdout", "trace-fatal"] }
 
 [profile.release]
 opt-level = "s"
