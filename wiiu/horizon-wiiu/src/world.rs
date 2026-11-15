@@ -177,6 +177,7 @@ impl World {
         World { blocks, sx: SIZE_X, sy: SIZE_Y, sz: SIZE_Z, y0: 0 }
     }
 
+    #[inline(never)]
     pub fn get(&self, x: i32, y: i32, z: i32) -> Block {
         if x < 0 || z < 0 || y < 0 || x >= self.sx as i32 || z >= self.sz as i32 || y >= self.sy as i32 {
             return Block::Air;
