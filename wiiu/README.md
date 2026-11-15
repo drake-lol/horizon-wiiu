@@ -71,3 +71,9 @@ exercise the same code; progress lines (`frame N pos ... broke= placed=`) appear
 Any Anvil `r.X.Z.mca` for this game version works; the viewer loads the first region's 8x8 chunks (128 wide, up to 128 high).
 Blocks are mapped by name to a procedural atlas (`loader.rs`); partial blocks and plants are skipped. Textures from a
 resource pack are not loaded yet.
+
+## Testing on a real Wii U
+
+`testbridge/` is an Aroma plugin and `tools/wiiuctl.py` its client: screenshots of the TV and GamePad, GamePad
+input, sending and starting an `.rpx`, logs, menu, reboot and power off over the network. See
+[testbridge/README.md](testbridge/README.md).
