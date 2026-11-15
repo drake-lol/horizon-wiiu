@@ -125,7 +125,11 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
                 }
             };
             let Some(Tag::List(sections)) = root.tag.get("sections") else {
-                println!("loader: chunk {cx},{cz}: no sections list ({:?})", root.tag.id());
+                let keys: Vec<String> = match &root.tag {
+                    Tag::Compound(m) => m.iter().map(|(k, v)| format!("{}:{}", k.to_string().unwrap_or_default(), v.id())).collect(),
+                    _ => Vec::new(),
+                };
+                println!("loader: chunk {cx},{cz}: no sections list; keys {keys:?}; {} compressed bytes, {:?}", record.compressed.len(), record.compression);
                 continue;
             };
             if cx < 2 && cz < 2 {
