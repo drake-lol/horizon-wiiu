@@ -122,9 +122,15 @@ static bool anyInjection(OSTime now) {
     return sTouch.on && active(sTouch.until, now);
 }
 
+static std::atomic<uint32_t> sVpadReads{0}, sVpadInjected{0}, sVpadEmpty{0};
+
 DECL_FUNCTION(int32_t, VPADRead, VPADChan chan, VPADStatus *buffers, uint32_t count, VPADReadError *outError) {
     VPADReadError err = VPAD_READ_SUCCESS;
     int32_t n         = real_VPADRead(chan, buffers, count, &err);
+    sVpadReads++;
+    if (n <= 0 || err != VPAD_READ_SUCCESS) {
+        sVpadEmpty++;
+    }
     if (chan != VPAD_CHAN_0 || buffers == nullptr || count == 0) {
         if (outError) {
             *outError = err;
@@ -145,6 +151,7 @@ DECL_FUNCTION(int32_t, VPADRead, VPADChan chan, VPADStatus *buffers, uint32_t co
         n   = 1;
         err = VPAD_READ_SUCCESS;
     }
+    sVpadInjected++;
     uint32_t b = buttonsNow(now);
     for (int32_t i = 0; i < n && i < (int32_t) count; i++) {
         VPADStatus &s = buffers[i];
@@ -492,8 +499,10 @@ static bool handle(int fd, const std::vector<std::string> &w) {
         return reply(fd, "OK pong");
     }
     if (cmd == "INFO") {
-        char msg[96];
-        snprintf(msg, sizeof msg, "OK title=%016llx version=%s", (unsigned long long) OSGetTitleID(), VERSION);
+        char msg[160];
+        snprintf(msg, sizeof msg, "OK title=%016llx version=%s vpad_reads=%u vpad_empty=%u vpad_injected=%u",
+                 (unsigned long long) OSGetTitleID(), VERSION, (unsigned) sVpadReads, (unsigned) sVpadEmpty,
+                 (unsigned) sVpadInjected);
         return reply(fd, msg);
     }
     if (cmd == "SCANINFO") {
