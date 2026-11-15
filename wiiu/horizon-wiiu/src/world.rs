@@ -1,0 +1,200 @@
+//! A small voxel world and its mesher. The terrain here is procedural; a loader for Minecraft region
+//! files replaces `generate` once the engine crates are linked in.
+
+pub const SIZE_X: usize = 128;
+pub const SIZE_Z: usize = 128;
+pub const SIZE_Y: usize = 64;
+pub const CHUNK: usize = 16;
+pub const SEA: usize = 22;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Block {
+    Air = 0,
+    Stone,
+    Dirt,
+    Grass,
+    Sand,
+    Water,
+    Snow,
+    Log,
+    Leaves,
+}
+
+impl Block {
+    pub fn solid(self) -> bool {
+        !matches!(self, Block::Air | Block::Water)
+    }
+
+    fn rgb(self) -> [u8; 3] {
+        match self {
+            Block::Air => [0, 0, 0],
+            Block::Stone => [125, 125, 125],
+            Block::Dirt => [134, 96, 67],
+            Block::Grass => [95, 159, 53],
+            Block::Sand => [219, 207, 163],
+            Block::Water => [46, 92, 200],
+            Block::Snow => [245, 250, 250],
+            Block::Log => [102, 81, 49],
+            Block::Leaves => [56, 118, 29],
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Vertex {
+    pub pos: [f32; 4],
+    pub color: [u8; 4],
+}
+
+pub struct World {
+    blocks: Vec<Block>,
+}
+
+fn hash(x: i32, z: i32, seed: u32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(0x27d4_eb2d) ^ (z as u32).wrapping_mul(0x1656_67b1) ^ seed.wrapping_mul(0x9e37_79b9);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x85eb_ca6b);
+    h ^= h >> 13;
+    h = h.wrapping_mul(0xc2b2_ae35);
+    h ^= h >> 16;
+    (h & 0xff_ffff) as f32 / 0x100_0000 as f32
+}
+
+fn smooth(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn value_noise(x: f32, z: f32, seed: u32) -> f32 {
+    let (xi, zi) = (x.floor() as i32, z.floor() as i32);
+    let (fx, fz) = (smooth(x - xi as f32), smooth(z - zi as f32));
+    let a = hash(xi, zi, seed);
+    let b = hash(xi + 1, zi, seed);
+    let c = hash(xi, zi + 1, seed);
+    let d = hash(xi + 1, zi + 1, seed);
+    let top = a + (b - a) * fx;
+    let bottom = c + (d - c) * fx;
+    top + (bottom - top) * fz
+}
+
+fn height_at(x: usize, z: usize) -> usize {
+    let (fx, fz) = (x as f32, z as f32);
+    let mut amp = 1.0;
+    let mut freq = 1.0 / 48.0;
+    let mut sum = 0.0;
+    let mut norm = 0.0;
+    for octave in 0..4 {
+        sum += value_noise(fx * freq, fz * freq, 7 + octave) * amp;
+        norm += amp;
+        amp *= 0.5;
+        freq *= 2.0;
+    }
+    let n = sum / norm;
+    (10.0 + n * n * 1.6 * 36.0).clamp(4.0, (SIZE_Y - 8) as f32) as usize
+}
+
+impl World {
+    pub fn generate() -> World {
+        let mut blocks = vec![Block::Air; SIZE_X * SIZE_Y * SIZE_Z];
+        let idx = |x: usize, y: usize, z: usize| (y * SIZE_Z + z) * SIZE_X + x;
+        for z in 0..SIZE_Z {
+            for x in 0..SIZE_X {
+                let h = height_at(x, z);
+                for y in 0..=h {
+                    let b = if y + 4 < h {
+                        Block::Stone
+                    } else if y < h {
+                        if h <= SEA + 1 { Block::Sand } else { Block::Dirt }
+                    } else if h <= SEA + 1 {
+                        Block::Sand
+                    } else if h > 46 {
+                        Block::Snow
+                    } else if h > 38 {
+                        Block::Stone
+                    } else {
+                        Block::Grass
+                    };
+                    blocks[idx(x, y, z)] = b;
+                }
+                for y in (h + 1)..=SEA {
+                    blocks[idx(x, y, z)] = Block::Water;
+                }
+                // a few trees on grass
+                if h > SEA + 1 && h <= 38 && x > 3 && z > 3 && x < SIZE_X - 4 && z < SIZE_Z - 4 && hash(x as i32, z as i32, 99) < 0.012 {
+                    for y in (h + 1)..(h + 5) {
+                        blocks[idx(x, y, z)] = Block::Log;
+                    }
+                    for dy in 3..6usize {
+                        let r: i32 = if dy == 5 { 1 } else { 2 };
+                        for dz in -r..=r {
+                            for dx in -r..=r {
+                                let (lx, lz) = ((x as i32 + dx) as usize, (z as i32 + dz) as usize);
+                                if blocks[idx(lx, h + dy, lz)] == Block::Air {
+                                    blocks[idx(lx, h + dy, lz)] = Block::Leaves;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        World { blocks }
+    }
+
+    pub fn get(&self, x: i32, y: i32, z: i32) -> Block {
+        if x < 0 || z < 0 || y < 0 || x >= SIZE_X as i32 || z >= SIZE_Z as i32 || y >= SIZE_Y as i32 {
+            return Block::Air;
+        }
+        self.blocks[(y as usize * SIZE_Z + z as usize) * SIZE_X + x as usize]
+    }
+
+    pub fn surface(&self, x: usize, z: usize) -> usize {
+        (0..SIZE_Y).rev().find(|&y| self.get(x as i32, y as i32, z as i32).solid()).unwrap_or(0)
+    }
+
+    /// Faces of the 16x16 column `(cx, cz)` as GX2 quads (four vertices each, counter-clockwise seen from outside).
+    pub fn mesh_chunk(&self, cx: usize, cz: usize) -> Vec<Vertex> {
+        // (neighbour offset, origin, u, v, brightness)
+        const FACES: [([i32; 3], [f32; 3], [f32; 3], [f32; 3], f32); 6] = [
+            ([1, 0, 0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], 0.65),
+            ([-1, 0, 0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0], 0.65),
+            ([0, 1, 0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0),
+            ([0, -1, 0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 0.5),
+            ([0, 0, 1], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0.8),
+            ([0, 0, -1], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], 0.8),
+        ];
+        let mut out = Vec::new();
+        for y in 0..SIZE_Y as i32 {
+            for z in (cz * CHUNK) as i32..((cz + 1) * CHUNK) as i32 {
+                for x in (cx * CHUNK) as i32..((cx + 1) * CHUNK) as i32 {
+                    let b = self.get(x, y, z);
+                    if b == Block::Air {
+                        continue;
+                    }
+                    let base = b.rgb();
+                    let tint = 0.94 + 0.12 * hash(x * 31 + y, z, 5);
+                    for (n, o, u, v, shade) in FACES.iter() {
+                        let nb = self.get(x + n[0], y + n[1], z + n[2]);
+                        let visible = if b == Block::Water { nb == Block::Air } else { !nb.solid() };
+                        if !visible {
+                            continue;
+                        }
+                        let k = shade * tint;
+                        let color = [(base[0] as f32 * k) as u8, (base[1] as f32 * k) as u8, (base[2] as f32 * k) as u8, 255];
+                        let p = [x as f32 + o[0], y as f32 + o[1], z as f32 + o[2]];
+                        let corner = |a: f32, c: f32| Vertex {
+                            pos: [p[0] + u[0] * a + v[0] * c, p[1] + u[1] * a + v[1] * c, p[2] + u[2] * a + v[2] * c, 1.0],
+                            color,
+                        };
+                        out.push(corner(0.0, 0.0));
+                        out.push(corner(1.0, 0.0));
+                        out.push(corner(1.0, 1.0));
+                        out.push(corner(0.0, 1.0));
+                    }
+                }
+            }
+        }
+        out
+    }
+}

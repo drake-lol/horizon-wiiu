@@ -1,0 +1,16 @@
+[package]
+name = "horizon-wiiu"
+version = "0.1.0"
+edition = "2021"
+description = "Horizon for Wii U: GX2 front end (own workspace; builds with wiiu/build tooling)"
+
+[workspace]
+
+[dependencies]
+wut-sys = { path = "../wut-sys" }
+wiiu-atomics = { path = "../atomics", features = ["skip-socket-init", "console-stdout", "trace-fatal"] }
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+debug = false
