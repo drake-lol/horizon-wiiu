@@ -309,3 +309,39 @@ pub unsafe extern "C" fn __wrap__write_r(reent: *mut u8, fd: c_int, buf: *const 
     }
     unsafe { __real__write_r(reent, fd, buf, len) }
 }
+
+// ---- more libc gaps the engine crates reach ----
+
+extern "C" {
+    fn lseek(fd: c_int, offset: i64, whence: c_int) -> i64;
+    fn read(fd: c_int, buf: *mut u8, count: usize) -> isize;
+    fn OSGetSystemTime() -> i64;
+}
+
+/// `pread`: newlib on the Wii U lacks it. Not atomic against other users of the same fd, which std's
+/// file reads here are not (one thread per open file).
+#[no_mangle]
+pub unsafe extern "C" fn pread(fd: c_int, buf: *mut u8, count: usize, offset: i64) -> isize {
+    unsafe {
+        let here = lseek(fd, 0, 1);
+        if here < 0 || lseek(fd, offset, 0) < 0 {
+            return -1;
+        }
+        let n = read(fd, buf, count);
+        lseek(fd, here, 0);
+        n
+    }
+}
+
+/// Entropy for hash-map seeds (not cryptographic): xorshift64* seeded from the system clock.
+#[no_mangle]
+pub unsafe extern "C" fn _getentropy_r(_reent: *mut u8, buf: *mut u8, len: usize) -> c_int {
+    let mut x = (unsafe { OSGetSystemTime() } as u64) ^ 0x9e37_79b9_7f4a_7c15;
+    for i in 0..len {
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        unsafe { *buf.add(i) = (x.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 56) as u8 };
+    }
+    0
+}
