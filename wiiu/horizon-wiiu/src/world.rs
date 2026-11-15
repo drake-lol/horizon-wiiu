@@ -199,6 +199,7 @@ impl World {
         ];
         let mut out = Vec::new();
         for y in 0..self.sy as i32 {
+            if cx == 0 && cz == 0 { println!("mesh y={y} verts={}", out.len()); }
             for z in (cz * CHUNK) as i32..((cz + 1) * CHUNK) as i32 {
                 for x in (cx * CHUNK) as i32..((cx + 1) * CHUNK) as i32 {
                     let b = self.get(x, y, z);
