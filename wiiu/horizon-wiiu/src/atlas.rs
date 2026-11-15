@@ -15,6 +15,12 @@ pub const SNOW: usize = 6;
 pub const LOG_TOP: usize = 7;
 pub const LOG_SIDE: usize = 8;
 pub const LEAVES: usize = 9;
+pub const PLANKS: usize = 10;
+pub const GRAVEL: usize = 11;
+pub const SANDSTONE: usize = 12;
+pub const ICE: usize = 13;
+pub const LAVA: usize = 14;
+pub const BEDROCK: usize = 15;
 
 fn noise(tile: usize, x: usize, y: usize) -> f32 {
     let mut h = (tile as u32).wrapping_mul(0x9e37_79b9) ^ (x as u32).wrapping_mul(0x85eb_ca6b) ^ (y as u32).wrapping_mul(0xc2b2_ae35);
@@ -59,6 +65,15 @@ fn pixel(tile: usize, x: usize, y: usize) -> [u8; 4] {
             shade([102.0, 81.0, 49.0], stripe * (0.9 + 0.2 * n))
         }
         LEAVES => shade([56.0, 118.0, 29.0], 0.65 + 0.6 * n),
+        PLANKS => {
+            let board = if y % 4 == 3 { 0.78 } else { 1.0 };
+            shade([162.0, 130.0, 78.0], board * (0.92 + 0.14 * n))
+        }
+        GRAVEL => shade([136.0, 126.0, 126.0], 0.7 + 0.5 * n),
+        SANDSTONE => shade([216.0, 203.0, 155.0], if y % 5 == 4 { 0.85 } else { 0.97 } * (0.96 + 0.08 * n)),
+        ICE => shade([145.0, 180.0, 245.0], 0.92 + 0.12 * n),
+        LAVA => shade([230.0, 110.0, 25.0], 0.7 + 0.5 * n),
+        BEDROCK => shade([70.0, 70.0, 70.0], 0.5 + 0.9 * n),
         _ => [255, 0, 255, 255],
     }
 }

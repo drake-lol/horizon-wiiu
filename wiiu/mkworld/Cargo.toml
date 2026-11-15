@@ -1,0 +1,11 @@
+[package]
+name = "mkworld"
+version = "0.1.0"
+edition = "2021"
+description = "Host tool: write a procedural Minecraft region file (r.0.0.mca) for the Wii U viewer's tests"
+
+[workspace]
+
+[dependencies]
+horizon-world = { path = "../../crates/horizon-world" }
+horizon-core = { path = "../../crates/horizon-core" }

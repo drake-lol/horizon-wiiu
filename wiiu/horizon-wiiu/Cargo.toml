@@ -7,6 +7,8 @@ description = "Horizon for Wii U: GX2 front end (own workspace; builds with wiiu
 [workspace]
 
 [dependencies]
+horizon-world = { path = "../../crates/horizon-world" }
+horizon-core = { path = "../../crates/horizon-core" }
 wut-sys = { path = "../wut-sys" }
 wiiu-atomics = { path = "../atomics", features = ["skip-socket-init", "console-stdout", "trace-fatal"] }
 

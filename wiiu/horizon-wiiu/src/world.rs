@@ -21,11 +21,17 @@ pub enum Block {
     Snow,
     Log,
     Leaves,
+    Planks,
+    Gravel,
+    Sandstone,
+    Ice,
+    Lava,
+    Bedrock,
 }
 
 impl Block {
     pub fn solid(self) -> bool {
-        !matches!(self, Block::Air | Block::Water)
+        !matches!(self, Block::Air | Block::Water | Block::Lava)
     }
 
     /// The atlas tile for a face: `up` is +Y, `down` is -Y, anything else a side.
@@ -43,6 +49,12 @@ impl Block {
                 if up || down { atlas::LOG_TOP } else { atlas::LOG_SIDE }
             }
             Block::Leaves => atlas::LEAVES,
+            Block::Planks => atlas::PLANKS,
+            Block::Gravel => atlas::GRAVEL,
+            Block::Sandstone => atlas::SANDSTONE,
+            Block::Ice => atlas::ICE,
+            Block::Lava => atlas::LAVA,
+            Block::Bedrock => atlas::BEDROCK,
         }
     }
 }
@@ -57,6 +69,11 @@ pub struct Vertex {
 
 pub struct World {
     blocks: Vec<Block>,
+    pub sx: usize,
+    pub sy: usize,
+    pub sz: usize,
+    /// World y of layer 0 (a saved world starts at -64).
+    pub y0: i32,
 }
 
 fn hash(x: i32, z: i32, seed: u32) -> f32 {
@@ -102,6 +119,15 @@ fn height_at(x: usize, z: usize) -> usize {
 }
 
 impl World {
+    pub fn empty(sx: usize, sy: usize, sz: usize, y0: i32) -> World {
+        World { blocks: vec![Block::Air; sx * sy * sz], sx, sy, sz, y0 }
+    }
+
+    pub fn set(&mut self, x: usize, y: usize, z: usize, b: Block) {
+        let i = (y * self.sz + z) * self.sx + x;
+        self.blocks[i] = b;
+    }
+
     pub fn generate() -> World {
         let mut blocks = vec![Block::Air; SIZE_X * SIZE_Y * SIZE_Z];
         let idx = |x: usize, y: usize, z: usize| (y * SIZE_Z + z) * SIZE_X + x;
@@ -146,18 +172,18 @@ impl World {
                 }
             }
         }
-        World { blocks }
+        World { blocks, sx: SIZE_X, sy: SIZE_Y, sz: SIZE_Z, y0: 0 }
     }
 
     pub fn get(&self, x: i32, y: i32, z: i32) -> Block {
-        if x < 0 || z < 0 || y < 0 || x >= SIZE_X as i32 || z >= SIZE_Z as i32 || y >= SIZE_Y as i32 {
+        if x < 0 || z < 0 || y < 0 || x >= self.sx as i32 || z >= self.sz as i32 || y >= self.sy as i32 {
             return Block::Air;
         }
-        self.blocks[(y as usize * SIZE_Z + z as usize) * SIZE_X + x as usize]
+        self.blocks[(y as usize * self.sz + z as usize) * self.sx + x as usize]
     }
 
     pub fn surface(&self, x: usize, z: usize) -> usize {
-        (0..SIZE_Y).rev().find(|&y| self.get(x as i32, y as i32, z as i32).solid()).unwrap_or(0)
+        (0..self.sy).rev().find(|&y| self.get(x as i32, y as i32, z as i32).solid()).unwrap_or(0)
     }
 
     /// Faces of the 16x16 column `(cx, cz)` as GX2 quads (four vertices each, counter-clockwise seen from outside).
@@ -172,7 +198,7 @@ impl World {
             ([0, 0, -1], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0], 0.8),
         ];
         let mut out = Vec::new();
-        for y in 0..SIZE_Y as i32 {
+        for y in 0..self.sy as i32 {
             for z in (cz * CHUNK) as i32..((cz + 1) * CHUNK) as i32 {
                 for x in (cx * CHUNK) as i32..((cx + 1) * CHUNK) as i32 {
                     let b = self.get(x, y, z);

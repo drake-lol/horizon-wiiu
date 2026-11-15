@@ -4,6 +4,7 @@ extern crate wiiu_atomics;
 
 mod atlas;
 mod gfx;
+mod loader;
 mod math;
 mod world;
 
@@ -32,11 +33,12 @@ fn main() {
     let ok = gfx.set_texture(atlas::SIZE as u32, atlas::SIZE as u32, &atlas::build());
     println!("horizon-wiiu: atlas texture -> {ok}");
 
-    let world = world::World::generate();
+    let world = loader::load().unwrap_or_else(world::World::generate);
+    println!("horizon-wiiu: world {}x{}x{} (y0 {})", world.sx, world.sy, world.sz, world.y0);
     let mut meshes = Vec::new();
     let mut quads = 0u32;
-    for cz in 0..world::SIZE_Z / world::CHUNK {
-        for cx in 0..world::SIZE_X / world::CHUNK {
+    for cz in 0..world.sz / world::CHUNK {
+        for cx in 0..world.sx / world::CHUNK {
             let verts = world.mesh_chunk(cx, cz);
             quads += verts.len() as u32 / 4;
             if let Some(m) = gfx.upload(&verts) {
@@ -46,7 +48,7 @@ fn main() {
     }
     println!("horizon-wiiu: {} chunk meshes, {} quads", meshes.len(), quads);
 
-    let centre = (world::SIZE_X / 2, world::SIZE_Z / 2);
+    let centre = (world.sx / 2, world.sz / 2);
     let mut cam = Camera { pos: [centre.0 as f32, world.surface(centre.0, centre.1) as f32 + 12.0, centre.1 as f32], yaw: 0.0, pitch: -0.45 };
     let mut frame = 0u32;
     let mut manual = false;
@@ -80,7 +82,7 @@ fn main() {
             let r = 42.0;
             cam.pos = [centre.0 as f32 + r * t.cos(), 0.0, centre.1 as f32 + r * t.sin()];
             let ground = world.surface(cam.pos[0] as usize, cam.pos[2] as usize) as f32;
-            cam.pos[1] = ground.max(world::SEA as f32) + 9.0;
+            cam.pos[1] = ground + 9.0;
             // face the centre of the world
             cam.yaw = core::f32::consts::FRAC_PI_2 - t;
             cam.pitch = -0.35;
