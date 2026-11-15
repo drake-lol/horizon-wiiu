@@ -221,7 +221,9 @@ struct ScanBuffers {
     uint32_t stride = 0; // bytes from one slot to the next
     uint32_t count  = 0;
     uint32_t width = 0, height = 0, pitch = 0, format = 0;
+    uint32_t size = 0, mode = 0, buffering = 0; // as the application passed them
 };
+static bool sShotRaw = false; // SHOTRAW: send the slot's bytes untouched
 static ScanBuffers sScanTV, sScanDRC;
 
 static void noteScanBuffers(ScanBuffers &sb, void *buffer, uint32_t size, uint32_t w, uint32_t h, GX2SurfaceFormat format,
@@ -239,8 +241,12 @@ static void noteScanBuffers(ScanBuffers &sb, void *buffer, uint32_t size, uint32
     GX2CalcSurfaceSizeAndAlignment(&s);
     uint32_t count = mode == GX2_BUFFERING_MODE_TRIPLE ? 3 : mode == GX2_BUFFERING_MODE_DOUBLE ? 2 : 1;
     std::lock_guard<std::mutex> lock(sShotLock);
-    sb        = ScanBuffers{};
-    if (!buffer || w == 0 || count * s.imageSize > size) {
+    sb           = ScanBuffers{};
+    sb.size      = size;
+    sb.buffering = mode;
+    sb.format    = format;
+    sb.count     = count;
+    if (!buffer || w == 0 || size / count == 0) {
         return;
     }
     sb.base   = (uint8_t *) buffer;
@@ -263,12 +269,14 @@ DECL_FUNCTION(void, GX2SetTVBuffer, void *buffer, uint32_t size, GX2TVRenderMode
         default: break;
     }
     noteScanBuffers(sScanTV, buffer, size, w, h, format, buffering);
+    sScanTV.mode = mode;
     real_GX2SetTVBuffer(buffer, size, mode, format, buffering);
 }
 
 DECL_FUNCTION(void, GX2SetDRCBuffer, void *buffer, uint32_t size, GX2DrcRenderMode mode, GX2SurfaceFormat format,
               GX2BufferingMode buffering) {
     noteScanBuffers(sScanDRC, buffer, size, mode == GX2_DRC_RENDER_MODE_DISABLED ? 0 : 854, 480, format, buffering);
+    sScanDRC.mode = mode;
     real_GX2SetDRCBuffer(buffer, size, mode, format, buffering);
 }
 
@@ -283,7 +291,8 @@ static const uint32_t kMark = 0x13579BDF;
 static uint32_t *markAt(const ScanBuffers &sb, uint32_t slot, int i) {
     uint32_t x = i == 0 ? 1 : i == 1 ? sb.width / 2 : sb.width - 2;
     uint32_t y = i == 0 ? 1 : i == 1 ? sb.height / 2 : sb.height - 2;
-    return (uint32_t *) (sb.base + (size_t) slot * sb.stride + ((size_t) y * sb.pitch + x) * 4);
+    size_t off = (((size_t) y * sb.pitch + x) * 4) % sb.stride; // the layout may be tiled: any word in the slot will do
+    return (uint32_t *) (sb.base + (size_t) slot * sb.stride + off);
 }
 
 static void markSlots(const ScanBuffers &sb) {
@@ -368,6 +377,12 @@ DECL_FUNCTION(void, GX2CopyColorBufferToScanBuffer, const GX2ColorBuffer *colorB
         int slot = writtenSlot(*sb);
         if (slot < 0) {
             sShotError = "could not tell which scan buffer the frame went to";
+        } else if (sShotRaw) {
+            const uint8_t *px = sb->base + (size_t) slot * sb->stride;
+            DCInvalidateRange((void *) px, sb->stride);
+            sShotRgb.assign(px, px + sb->stride);
+            sShotW = sb->stride;
+            sShotH = (uint32_t) slot;
         } else {
             readSlot(*sb, (uint32_t) slot);
         }
@@ -478,13 +493,22 @@ static bool handle(int fd, const std::vector<std::string> &w) {
         snprintf(msg, sizeof msg, "OK title=%016llx version=%s", (unsigned long long) OSGetTitleID(), VERSION);
         return reply(fd, msg);
     }
-    if (cmd == "SHOT") {
+    if (cmd == "SCANINFO") {
+        std::lock_guard<std::mutex> lock(sShotLock);
+        char msg[200];
+        snprintf(msg, sizeof msg, "OK tv=%p size=%u mode=%u buf=%u fmt=%#x count=%u | drc=%p size=%u mode=%u buf=%u fmt=%#x count=%u",
+                 sScanTV.base, sScanTV.size, sScanTV.mode, sScanTV.buffering, sScanTV.format, sScanTV.count, sScanDRC.base,
+                 sScanDRC.size, sScanDRC.mode, sScanDRC.buffering, sScanDRC.format, sScanDRC.count);
+        return reply(fd, msg);
+    }
+    if (cmd == "SHOT" || cmd == "SHOTRAW") {
         std::string which = arg(1, "TV");
         int target        = (strcasecmp(which.c_str(), "DRC") == 0) ? GX2_SCAN_TARGET_DRC : GX2_SCAN_TARGET_TV;
         uint32_t scale    = (uint32_t) strtoul(arg(2, "1").c_str(), nullptr, 10);
         std::unique_lock<std::mutex> lock(sShotLock);
         sShotReady  = false;
         sShotScale  = scale ? scale : 1;
+        sShotRaw    = cmd == "SHOTRAW";
         sShotTarget = target;
         if (!sShotDone.wait_for(lock, std::chrono::seconds(5), [] { return sShotReady; })) {
             sShotTarget = 0;
