@@ -46,11 +46,75 @@ fn run(name: &str, f: impl Fn(u64, u64) -> u64, vals: &[u64]) {
     println!("{name:24} {:016x}", h.0);
 }
 
+#[inline(never)]
+fn cmp_u32(x: u32, y: u32) -> i8 {
+    x.cmp(&y) as i8
+}
+#[inline(never)]
+fn cmp_i32(x: i32, y: i32) -> i8 {
+    x.cmp(&y) as i8
+}
+#[inline(never)]
+fn cmp_u16(x: u16, y: u16) -> i8 {
+    x.cmp(&y) as i8
+}
+#[inline(never)]
+fn sat_sub(x: u64, y: u64) -> u64 {
+    x.saturating_sub(y)
+}
+#[inline(never)]
+fn sat_add(x: u64, y: u64) -> u64 {
+    x.saturating_add(y)
+}
+#[inline(never)]
+fn sat_sub32(x: u32, y: u32) -> u32 {
+    x.saturating_sub(y)
+}
+#[inline(never)]
+fn fma(x: f64, y: f64) -> f64 {
+    x.mul_add(y, 1.0)
+}
+#[inline(never)]
+fn fsqrt(x: f64) -> f64 {
+    x.sqrt()
+}
+#[inline(never)]
+fn fdiv(x: f64, y: f64) -> f64 {
+    x / y
+}
+
+fn micro() {
+    let pairs: [(u64, u64); 10] = [
+        (0, 0), (1, 2), (2, 1), (0x8000_0000, 1), (1, 0x8000_0000), (0xFFFF_FFFF, 0), (5, 5),
+        (0x1_0000_0001, 0x1_0000_0000), (0x0000_0001_0000_0000, 0x0000_0000_FFFF_FFFF), (u64::MAX, 1),
+    ];
+    for (a, b) in pairs {
+        println!(
+            "micro {a:x} {b:x}: cmpu32 {} cmpi32 {} cmpu16 {} satsub {:x} satadd {:x} satsub32 {:x}",
+            cmp_u32(bb(a as u32), bb(b as u32)),
+            cmp_i32(bb(a as i32), bb(b as i32)),
+            cmp_u16(bb(a as u16), bb(b as u16)),
+            sat_sub(bb(a), bb(b)),
+            sat_add(bb(a), bb(b)),
+            sat_sub32(bb(a as u32), bb(b as u32)),
+        );
+    }
+    for (x, y) in [(2.0f64, 3.0f64), (1e10, 1e-10), (0.1, 0.7), (123456.789, 0.000321)] {
+        println!(
+            "microf {x} {y}: fma {:x} sqrt {:x} div {:x}",
+            fma(bb(x), bb(y)).to_bits(),
+            fsqrt(bb(x)).to_bits(),
+            fdiv(bb(x), bb(y)).to_bits()
+        );
+    }
+}
+
 fn main() {
     #[cfg(target_vendor = "wiiu")]
     unsafe {
         wut_sys::WHBProcInit();
     }
+    micro();
     let mut r = Rng(0x1234_5678_9ABC_DEF1);
     let v = values(&mut r);
     run("u64 add", |a, b| a.wrapping_add(b), &v);
