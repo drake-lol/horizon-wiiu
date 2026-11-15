@@ -1,6 +1,23 @@
 //! Startup shared by the gameplay library and its executable.
 use crate::{crash, game, logging};
 
+/// The command line after the program name. The Wii U has none: there it is `horizon/args.txt` on the SD
+/// card, one argument per line (blank lines and `#` comments skipped).
+pub fn launch_args() -> Vec<String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if cfg!(target_vendor = "wiiu") && args.is_empty() {
+        if let Ok(text) = std::fs::read_to_string("fs:/vol/external01/horizon/args.txt") {
+            return text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(String::from)
+                .collect();
+        }
+    }
+    args
+}
+
 /// Start the game. The executable supplies the allocator and retains the mod API marker.
 pub fn main() {
     main_with(Default::default());
@@ -33,7 +50,7 @@ pub fn main_with(mods: crate::mod_api::Mods) {
     // The text crates ship (`horizon_hooks::lang`), loaded with the game's own languages.
     horizon_client::lang::install_crate_files(horizon_hooks::lang::engine::all());
     horizon_client::spans::startup::init(std::time::Instant::now());
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = launch_args();
     let game_args = args.iter().take_while(|a| *a != "--dedicated");
     let help = game_args
         .clone()

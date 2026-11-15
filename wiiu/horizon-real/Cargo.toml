@@ -1,0 +1,23 @@
+[package]
+name = "horizon-real"
+version = "0.1.0"
+edition = "2021"
+description = "The real Horizon client (horizon-client: gameplay and the real renderer) as a Wii U program"
+
+[workspace]
+
+[dependencies]
+horizon-client = { path = "../../crates/horizon-client", default-features = false }
+wut-sys = { path = "../wut-sys" }
+wiiu-atomics = { path = "../atomics", features = ["console-stdout", "trace-fatal"] }
+
+[patch.crates-io]
+wgpu-hal = { path = "../../third_party/wgpu-hal" }
+naga = { path = "../../third_party/naga" }
+libmimalloc-sys = { path = "../../third_party/libmimalloc-sys" }
+winit = { path = "../../third_party/winit" }
+
+[profile.release]
+opt-level = 1
+panic = "abort"
+debug = false
