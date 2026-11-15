@@ -399,10 +399,33 @@ extern "C" {
 #[no_mangle]
 pub unsafe extern "C" fn __wrap__write_r(reent: *mut u8, fd: c_int, buf: *const u8, len: usize) -> isize {
     if fd == 1 || fd == 2 {
-        unsafe { OSConsoleWrite(buf as *const c_char, len as c_uint) };
+        unsafe {
+            OSConsoleWrite(buf as *const c_char, len as c_uint);
+            console_file(reent, buf, len);
+        }
         return len as isize;
     }
     unsafe { __real__write_r(reent, fd, buf, len) }
+}
+
+/// stdout and stderr also go to `horizon/console.txt` on the SD card: an emulator's log may not keep the
+/// OS console, and a real console has no console to read.
+#[cfg(feature = "console-stdout")]
+unsafe fn console_file(reent: *mut u8, buf: *const u8, len: usize) {
+    use core::sync::atomic::AtomicI32;
+    extern "C" {
+        fn open(path: *const c_char, flags: c_int, mode: c_int) -> c_int;
+    }
+    static FD: AtomicI32 = AtomicI32::new(-2);
+    let mut fd = FD.load(Ordering::Acquire);
+    if fd == -2 {
+        // O_WRONLY | O_CREAT | O_TRUNC (newlib)
+        fd = unsafe { open(c"fs:/vol/external01/horizon/console.txt".as_ptr(), 0x0001 | 0x0200 | 0x0400, 0o644) };
+        FD.store(fd, Ordering::Release);
+    }
+    if fd >= 0 {
+        unsafe { __real__write_r(reent, fd, buf, len) };
+    }
 }
 
 // ---- more libc gaps the engine crates reach ----

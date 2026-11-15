@@ -162,6 +162,13 @@ impl Stream {
     }
     fn set_read_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
         match self {
+            // Socket options crash Cemu's socket layer on the Wii U: reads there block.
+            #[cfg(target_vendor = "wiiu")]
+            Self::Tcp(_) => {
+                let _ = timeout;
+                Ok(())
+            }
+            #[cfg(not(target_vendor = "wiiu"))]
             Self::Tcp(s) => s.set_read_timeout(timeout),
             Self::Memory(p) => {
                 *p.timeout.lock().unwrap() = timeout;
@@ -271,6 +278,13 @@ pub struct Connection {
     pub writer: ConnWriter,
 }
 fn configure_stream(stream: &TcpStream) -> Result<()> {
+    // No socket options on the Wii U: Cemu's setsockopt traps on them.
+    #[cfg(target_vendor = "wiiu")]
+    {
+        let _ = stream;
+        return Ok(());
+    }
+    #[cfg(not(target_vendor = "wiiu"))]
     stream.set_nodelay(true)?;
     let sock = socket2::SockRef::from(stream);
     // Keepalive tuning is best effort; the Wii U's socket stack has none of its knobs.
@@ -319,6 +333,11 @@ impl Connection {
     /// in a round-robin set costs 250 ms instead of the whole timeout.
     fn connect_addresses(host: &str, addrs: Vec<SocketAddr>, timeout: Duration) -> Result<Self> {
         Self::connect_addresses_with(host, addrs, timeout, |addr, timeout| {
+            // connect_timeout makes the socket non-blocking with setsockopt, which Cemu traps on.
+            if cfg!(target_vendor = "wiiu") {
+                let _ = timeout;
+                return TcpStream::connect(addr);
+            }
             TcpStream::connect_timeout(&addr, timeout)
         })
     }
@@ -653,6 +672,10 @@ impl ConnReader {
         Ok(Closer(self.stream.try_clone()?))
     }
     pub fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<()> {
+        if cfg!(target_vendor = "wiiu") {
+            let _ = timeout;
+            return Ok(());
+        }
         Ok(self.stream.set_read_timeout(timeout)?)
     }
 }
