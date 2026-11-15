@@ -8,8 +8,8 @@ pub mod wayland;
 
 /// Opens a Vulkan device with `VK_EXT_hdr_metadata` too, when the GPU offers
 /// it, so [`set_metadata`] can tell the compositor the real peak brightness.
-/// `None` leaves opening to wgpu.
-#[cfg(not(target_os = "macos"))]
+/// `None` leaves opening to wgpu. (No Vulkan on macOS or the Wii U.)
+#[cfg(not(any(target_os = "macos", target_vendor = "wiiu")))]
 pub fn open_vulkan_device(
     adapter: &wgpu::Adapter,
     desc: &wgpu::DeviceDescriptor<'_>,
@@ -60,7 +60,7 @@ pub fn experimental_features() -> wgpu::ExperimentalFeatures {
 /// content is BT.709, peaks at `peak` nits and is no darker than `black`. Needs a
 /// device from `open_vulkan_device` and a configured surface; does nothing otherwise.
 pub fn set_metadata(device: &wgpu::Device, surface: &wgpu::Surface<'_>, peak: f32, black: f32) {
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_vendor = "wiiu")))]
     {
         use wgpu::hal::api::Vulkan;
         // Safety: read-only access to handles wgpu keeps alive while these guards live.

@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["wiiu/atomics", "wiiu/hello", "wiiu/stdtest", "launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/libmimalloc-sys"]
+exclude = ["wiiu/atomics", "wiiu/hello", "wiiu/stdtest", "launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/naga", "third_party/winit", "third_party/libmimalloc-sys"]
 members = [
     "crates/horizon-addresses",
     "crates/horizon-core",
@@ -91,6 +91,9 @@ naga = { path = "third_party/naga" }
 # game died before main on CPUs without it (Core 2, #7264; THIRD_PARTY_NOTICES.md). Drop this and
 # the folder once a libmimalloc-sys release has microsoft/mimalloc#1291's fix.
 libmimalloc-sys = { path = "third_party/libmimalloc-sys" }
+# winit 0.30.13 with a Wii U platform (target_vendor = "wiiu"): no window system there, so the TV
+# picture is the one window and the Wii U client runs its own frame loop (wiiu/PORTING.md).
+winit = { path = "third_party/winit" }
 
 # Line tables keep file:line in backtraces; full debug info made every
 # example and test binary hundreds of megabytes and slow to link.

@@ -13,3 +13,4 @@ horizon-client-render = { path = "../../crates/horizon-client-render", default-f
 wgpu-hal = { path = "../../third_party/wgpu-hal" }
 naga = { path = "../../third_party/naga" }
 libmimalloc-sys = { path = "../../third_party/libmimalloc-sys" }
+winit = { path = "../../third_party/winit" }
