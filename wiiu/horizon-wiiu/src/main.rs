@@ -36,7 +36,9 @@ fn watchdog() {
 
 fn main() {
     println!("horizon-wiiu: start");
-    watchdog();
+    if std::env::var_os("HORIZON_WATCHDOG").is_some() {
+        watchdog();
+    }
     unsafe {
         WHBProcInit();
         VPADInit();

@@ -72,7 +72,6 @@ fn region_files(dir: &str) -> Vec<(i32, i32, String)> {
     let Ok(read) = std::fs::read_dir(dir) else { return out };
     for entry in read.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        println!("loader:   entry {name:?}");
         let parts: Vec<&str> = name.split('.').collect();
         if parts.len() == 4 && parts[0] == "r" && parts[3] == "mca" {
             if let (Ok(x), Ok(z)) = (parts[1].parse(), parts[2].parse()) {
@@ -125,24 +124,9 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
                 }
             };
             let Some(Tag::List(sections)) = root.tag.get("sections") else {
-                let keys: Vec<String> = match &root.tag {
-                    Tag::Compound(m) => m.iter().map(|(k, v)| format!("{}:{}", k.to_string().unwrap_or_default(), v.id())).collect(),
-                    _ => Vec::new(),
-                };
-                println!("loader: chunk {cx},{cz}: no sections list; keys {keys:?}; {} compressed bytes, {:?}", record.compressed.len(), record.compression);
-                if let Tag::Compound(m) = &root.tag {
-                    let want: Vec<u16> = "sections".encode_utf16().collect();
-                    for (k, v) in m.iter() {
-                        println!("loader:   key len={} units={:?} eq_sections={} cmp={:?} is_list={}", k.0.len(), k.0, k.0 == want, k.0.cmp(&want), matches!(v, Tag::List(_)));
-                    }
-                    let j = horizon_world::nbt::JavaString::from("sections");
-                    println!("loader:   map.get(JavaString) = {}", m.get(&j).is_some());
-                }
+                println!("loader: chunk {cx},{cz}: no sections list");
                 continue;
             };
-            if cx < 2 && cz < 2 {
-                println!("loader: chunk {cx},{cz}: {} section(s), {} compressed bytes", sections.len(), record.compressed.len());
-            }
             for s in sections {
                 let Some(Tag::Byte(y)) = s.get("Y") else { continue };
                 let air_only = match s.get("block_states").and_then(|c| PalettedContainer::from_nbt(c, 4096, 4).ok()) {
@@ -174,11 +158,6 @@ pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
             }
             let Some(container) = s.get("block_states").and_then(|c| PalettedContainer::from_nbt(c, 4096, 4).ok()) else { continue };
             names.clear();
-            if *cx == 0 && *cz == 0 {
-                let sample = container.get(0).ok().and_then(|t| BlockState::from_nbt(t).ok()).map(|b| b.name);
-                let mid = container.get(2048).ok().and_then(|t| BlockState::from_nbt(t).ok()).map(|b| b.name);
-                println!("loader: section Y={y} palette={} bits={} [0]={sample:?} [2048]={mid:?}", container.palette_len(), container.bits());
-            }
             for i in 0..4096 {
                 let Ok(tag) = container.get(i) else { continue };
                 let key = tag as *const Tag as usize;

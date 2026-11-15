@@ -1,6 +1,6 @@
 # Horizon for Wii U (work in progress)
 
-Experimental port. Status: the real `horizon-server` binary boots in Cemu and prints its CLI usage (`std`: heap, `println!`, threads work);
+Experimental port. Status: **a real Minecraft Anvil region file (`r.0.0.mca`, read from the SD card through horizon-world) renders textured on the emulated Wii U**; earlier: the real `horizon-server` binary boots in Cemu and prints its CLI usage (`std`: heap, `println!`, threads work);
 Rust drives the GPU through GX2: `horizon-wiiu/` renders a textured voxel world (73k quads, depth, culling, GamePad input) in Cemu.
 
 ## Layout
@@ -44,3 +44,23 @@ Cemu lacks `nsysnet.set_multicast_state`, so test builds use the `skip-socket-in
 - The client (`horizon-client*`) pulls in winit, wgpu, arboard, fs4 (rustix) and others that need a Wii U
   window/input/GX2 layer; this is the main remaining work.
 - Thread-exit destructors for pthread keys are not run; no real TLS (`has-thread-local` is false).
+
+## Findings worth keeping (things that cost hours)
+- **Cemu hangs on PowerPC condition-register logic** (`cror`, `crnand`, ...): a meshing loop spun forever. The target spec
+  now carries `-crbits`, which removes them. Real hardware was not tested.
+- **`Ord` on `[u16]` returned wrong results** on this target (equal slices `Less`, different ones `Equal`), so every NBT
+  compound lookup failed intermittently. `horizon-world`'s `JavaString` has an explicit loop for `target_vendor = "wiiu"`.
+  The root cause (a backend miscompile of the three-way compare, or an ABI mismatch) is not found; check other `Ord` uses.
+- **libc crate layouts are Vita's, not devkitPPC's** (`wiiu/patches/patch_libc.py`): pthread sizes and initialisers, `dirent`
+  (`d_name` at 105), `stat` (96 bytes; `fstat` overran the buffer and crashed Cemu), `time_t`/`off_t` (64-bit), `dev_t`/`ino_t`.
+  The patch carries compile-time layout assertions. After re-vendoring, `touch` the vendor files or cargo will not rebuild.
+- **zlib-rs** was suspected for chunk decoding and replaced by miniz_oxide on this target; it was not the cause but is kept
+  (pure Rust, no big-endian doubts).
+- `HORIZON_WATCHDOG=1` (any value) starts a thread that logs the main thread's last-saved pc/lr every 2 s.
+
+## Test world
+    cd wiiu/mkworld && cargo run --release -- out/region      # writes out/region/r.0.0.mca (procedural terrain, real chunk NBT)
+    cp out/region/r.0.0.mca <Cemu data>/sdcard/horizon/world/region/   # the viewer reads /vol/external01/horizon/world/region
+Any Anvil `r.X.Z.mca` for this game version works; the viewer loads the first region's 8x8 chunks (128 wide, up to 128 high).
+Blocks are mapped by name to a procedural atlas (`loader.rs`); partial blocks and plants are skipped. Textures from a
+resource pack are not loaded yet.
