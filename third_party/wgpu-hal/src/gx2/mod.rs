@@ -47,6 +47,58 @@ macro_rules! trace {
 }
 pub(crate) use trace;
 
+/// Switches for chasing rendering bugs on the console, read once from `horizon/gx2debug.txt` on the SD card
+/// (words: `nodepth` depth test off, `nocull` no face culling, `noblend` blending off, `drawlog=<frame>` log
+/// every pass and draw of that frame and the next).
+#[derive(Default, Debug)]
+pub(crate) struct DebugFlags {
+    pub nodepth: bool,
+    pub nocull: bool,
+    pub noblend: bool,
+    pub drawlog: Option<u32>,
+}
+
+pub(crate) fn debug_flags() -> &'static DebugFlags {
+    static FLAGS: std::sync::OnceLock<DebugFlags> = std::sync::OnceLock::new();
+    FLAGS.get_or_init(|| {
+        let mut f = DebugFlags::default();
+        if let Ok(text) = std::fs::read_to_string("/vol/external01/horizon/gx2debug.txt") {
+            for w in text.split_whitespace() {
+                match w {
+                    "nodepth" => f.nodepth = true,
+                    "nocull" => f.nocull = true,
+                    "noblend" => f.noblend = true,
+                    _ => {
+                        if let Some(n) = w.strip_prefix("drawlog=") {
+                            f.drawlog = n.parse().ok();
+                        }
+                    }
+                }
+            }
+            std::println!("GX2: debug switches {f:?}");
+        }
+        f
+    })
+}
+
+static BUSY_FROM: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(u32::MAX);
+
+/// Note at present whether the frame just shown was a real one (more than 10 draws): `drawlog=K` counts from
+/// the first of those.
+pub(crate) fn note_frame(frame: u32, draws: u32) {
+    use core::sync::atomic::Ordering::Relaxed;
+    if draws > 10 && BUSY_FROM.load(Relaxed) == u32::MAX {
+        BUSY_FROM.store(frame, Relaxed);
+        std::println!("GX2: frame {frame} is the first with {draws} draws");
+    }
+}
+
+/// Whether this frame's passes and draws are logged (`drawlog=K`: K frames after the first real one, and the next).
+pub(crate) fn draw_logged(frame: u32) -> bool {
+    let from = BUSY_FROM.load(core::sync::atomic::Ordering::Relaxed);
+    from != u32::MAX && debug_flags().drawlog.is_some_and(|k| frame == from + k || frame == from + k + 1)
+}
+
 pub use command::CommandBuffer;
 
 #[derive(Clone, Debug)]
@@ -135,6 +187,7 @@ pub(crate) struct Stats {
     pub skipped_draws: u32,
     pub clears: u32,
     pub uploads: u32,
+    pub draws_at_frame_start: u32,
 }
 
 unsafe impl Send for Shared {}
@@ -344,6 +397,7 @@ pub struct RenderPipeline {
     pub(crate) blends: [Option<Blend>; 8],
     pub(crate) masks: [GX2ChannelMask; 8],
     pub(crate) targets: u32,
+    pub(crate) label: String,
 }
 
 unsafe impl Send for RenderPipeline {}
@@ -694,6 +748,8 @@ impl crate::Queue for Queue {
             WHBGfxFinishRender();
         }
         let st = &mut shared.stats;
+        note_frame(st.frames, st.draws - st.draws_at_frame_start);
+        st.draws_at_frame_start = st.draws;
         st.frames += 1;
         if st.frames <= 3 || st.frames % 300 == 0 {
             std::println!("GX2: frame {} so far {:?}", st.frames, st);
@@ -1068,6 +1124,7 @@ impl crate::Device for Device {
             blends,
             masks,
             targets,
+            label: desc.label.unwrap_or("?").to_string(),
         })
     }
 

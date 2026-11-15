@@ -198,6 +198,20 @@ impl State {
                         shared.stats.dead_passes += 1;
                         return;
                     }
+                    if super::draw_logged(shared.stats.frames) {
+                        let cs: Vec<String> = colors
+                            .iter()
+                            .map(|(cb, clear, _)| {
+                                let s = &(**cb).surface;
+                                format!("{}x{} fmt {:#x} aa {} clear {:?}", s.width, s.height, s.format, s.aa, clear)
+                            })
+                            .collect();
+                        let ds = depth.as_ref().map(|(db, d, st, _)| {
+                            let s = &(**db).surface;
+                            format!("{}x{} fmt {:#x} clear {:?}/{:?}", s.width, s.height, s.format, d, st)
+                        });
+                        std::println!("GX2 frame {} pass {}: extent {:?} colours {:?} depth {:?}", shared.stats.frames, shared.stats.passes, extent, cs, ds);
+                    }
                     shared.stats.clears += colors.iter().filter(|c| c.1.is_some()).count() as u32;
                     // clears first: they overwrite state, which the reset below restores
                     for (cb, clear, _) in colors {
@@ -282,6 +296,14 @@ impl State {
                     if let Some(p) = self.ready() {
                         shared.stats.draws += 1;
                         let p = &*p;
+                        if super::draw_logged(shared.stats.frames) {
+                            std::println!(
+                                "GX2   draw {:?} verts {}+{} inst {}+{} depth {:?} cull {}/{} blend {} masks {:#x}",
+                                p.label, first_vertex, vertex_count, first_instance, instance_count,
+                                p.depth.as_ref().map(|d| (d.depth_compare, d.depth_write_enabled)), p.cull_front, p.cull_back,
+                                p.blends[0].is_some(), p.masks[0]
+                            );
+                        }
                         self.bind(p);
                         GX2DrawEx2(p.mode, *vertex_count, *first_vertex, *instance_count, *first_instance);
                     }
@@ -293,6 +315,14 @@ impl State {
                     if let (Some(p), Some((ptr, wide))) = (self.ready(), self.index) {
                         shared.stats.draws += 1;
                         let p = &*p;
+                        if super::draw_logged(shared.stats.frames) {
+                            std::println!(
+                                "GX2   indexed {:?} idx {}+{} base {} inst {}+{} depth {:?} cull {}/{} blend {} masks {:#x}",
+                                p.label, first_index, index_count, base_vertex, first_instance, instance_count,
+                                p.depth.as_ref().map(|d| (d.depth_compare, d.depth_write_enabled)), p.cull_front, p.cull_back,
+                                p.blends[0].is_some(), p.masks[0]
+                            );
+                        }
                         self.bind(p);
                         let (ty, size) = if wide {
                             (GX2IndexType_GX2_INDEX_TYPE_U32, 4)
@@ -328,10 +358,11 @@ impl State {
             if let Some(ps) = &p.ps {
                 GX2SetPixelShader(&*ps.shader);
             }
+            let dbg = super::debug_flags();
             GX2SetPolygonControl(
                 p.front_face,
-                p.cull_front as BOOL,
-                p.cull_back as BOOL,
+                (p.cull_front && !dbg.nocull) as BOOL,
+                (p.cull_back && !dbg.nocull) as BOOL,
                 0,
                 GX2PolygonMode_GX2_POLYGON_MODE_TRIANGLE,
                 GX2PolygonMode_GX2_POLYGON_MODE_TRIANGLE,
@@ -341,7 +372,7 @@ impl State {
             );
             let mut enable = 0u8;
             for (i, b) in p.blends.iter().enumerate() {
-                if let Some(b) = b {
+                if let Some(b) = b.as_ref().filter(|_| !dbg.noblend) {
                     enable |= 1 << i;
                     GX2SetBlendControl(
                         i as GX2RenderTarget,
@@ -366,7 +397,7 @@ impl State {
     unsafe fn apply_stencil(&self, p: &RenderPipeline) {
         use super::conv::{compare, stencil_op};
         unsafe {
-            match &p.depth {
+            match p.depth.as_ref().filter(|_| !super::debug_flags().nodepth) {
                 Some(d) => {
                     let s = &d.stencil;
                     let stencil = s.is_enabled();
