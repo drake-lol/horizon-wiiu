@@ -14,6 +14,6 @@ wut-sys = { path = "../wut-sys" }
 wiiu-atomics = { path = "../atomics", features = ["console-stdout", "trace-fatal"] }
 
 [profile.release]
-opt-level = "s"
+opt-level = 1
 panic = "abort"
 debug = false
