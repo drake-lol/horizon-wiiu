@@ -103,6 +103,29 @@ pub unsafe extern "C" fn lchown(_path: *const c_char, _owner: c_uint, _group: c_
     unsafe { fail() }
 }
 
+extern "C" {
+    fn __real_ftruncate(fd: c_int, len: i64) -> c_int;
+    fn lseek(fd: c_int, offset: i64, whence: c_int) -> i64;
+}
+
+/// Linked with `--wrap=ftruncate` (wiiu/tools/bldrpx.sh). Cemu never answers wut's FSA truncate, so a
+/// truncate that would not change the file's size (setting a new, empty file to 0: logs, locks) is done
+/// without asking the filesystem.
+#[no_mangle]
+pub unsafe extern "C" fn __wrap_ftruncate(fd: c_int, len: i64) -> c_int {
+    unsafe {
+        let at = lseek(fd, 0, 1);
+        let end = lseek(fd, 0, 2);
+        if at >= 0 {
+            lseek(fd, at, 0);
+        }
+        if end >= 0 && end == len {
+            return 0;
+        }
+        __real_ftruncate(fd, len)
+    }
+}
+
 /// No pipes on the Wii U (mio's waker asks for one): fail with ENOSYS.
 #[no_mangle]
 pub unsafe extern "C" fn pipe2(_fds: *mut c_int, _flags: c_int) -> c_int {
