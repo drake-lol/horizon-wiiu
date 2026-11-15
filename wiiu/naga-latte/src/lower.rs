@@ -921,6 +921,13 @@ impl<'a> Lower<'a> {
             Expression::Access { base, index } => {
                 let i = self.val(fr, index)?[0];
                 if let (A::Imm(k), false, false) = (i.a, i.neg, i.abs) {
+                    // a runtime index that folded to a constant: clamp it the way WGSL clamps indices
+                    let t = match self.eval(fr, base)? {
+                        Lv::Ptr(p) => p.ty,
+                        _ => self.ty_of(fr, base).clone(),
+                    };
+                    let count = self.dyn_shape(&t, false).map(|s| s.2).unwrap_or(u32::MAX);
+                    let k = if (k as i32) < 0 { 0 } else { k.min(count.saturating_sub(1)) };
                     return self.access(fr, base, k);
                 }
                 match self.eval(fr, base)? {
@@ -1011,16 +1018,32 @@ impl<'a> Lower<'a> {
                         w = Some(self.val(fr, r)?[0]);
                         texop::SAMPLE_C_LZ
                     }
+                    (SampleLevel::Gradient { x, y }, None) => {
+                        let gx = self.val(fr, x)?;
+                        let gy = self.val(fr, y)?;
+                        let mut off = [0i8; 3];
+                        if let Some(o) = offset {
+                            off = self.texel_offset(fr, o)?;
+                        }
+                        let pad = |g: Vec<Arg>| [g.first().copied(), g.get(1).copied(), g.get(2).copied(), None];
+                        let srcs = [Some(coord[0]), Some(coord[1]), Some(coord[2]), None];
+                        let r = self.tex_seq(
+                            &[
+                                (texop::SET_GRADIENTS_H as u8, pad(gx), false),
+                                (texop::SET_GRADIENTS_V as u8, pad(gy), false),
+                                (texop::SAMPLE_G as u8, srcs, true),
+                            ],
+                            resource,
+                            sampler,
+                            off,
+                        )?;
+                        return Ok(Lv::Val(if depth { vec![r[0]] } else { r }));
+                    }
                     (other, _) => return unsupported(format!("sample level {other:?}")),
                 };
                 let mut off = [0i8; 3];
                 if let Some(o) = offset {
-                    for (i, a) in self.val(fr, o)?.iter().enumerate() {
-                        match a.a {
-                            A::Imm(x) => off[i] = (x as i32 * 2) as i8,
-                            _ => return unsupported("non-constant texel offset"),
-                        }
-                    }
+                    off = self.texel_offset(fr, o)?;
                 }
                 let srcs = [Some(coord[0]), Some(coord[1]), Some(coord[2]), w];
                 let r = self.tex(inst as u8, srcs, resource, sampler, off, true)?;
@@ -1183,6 +1206,48 @@ impl<'a> Lower<'a> {
             TypeInner::Image { dim, class, .. } => Ok((res, dim, matches!(class, ImageClass::Depth { .. }))),
             _ => unreachable!(),
         }
+    }
+
+    fn texel_offset(&mut self, fr: &mut Frame<'a>, o: Handle<Expression>) -> R<[i8; 3]> {
+        let mut off = [0i8; 3];
+        for (i, a) in self.val(fr, o)?.iter().enumerate() {
+            match a.a {
+                // 1.3.1 fixed point: whole texels are twice the integer
+                A::Imm(x) => off[i] = (x as i32 * 2) as i8,
+                _ => return unsupported("non-constant texel offset"),
+            }
+        }
+        Ok(off)
+    }
+
+    /// Several texture instructions back to back (one clause), their sources all copied first; the results of
+    /// the ones marked `true`, concatenated.
+    fn tex_seq(&mut self, items: &[(u8, [Option<Arg>; 4], bool)], resource: u8, sampler: u8, offset: [i8; 3]) -> R<Vec<Arg>> {
+        let mut coords = Vec::new();
+        for (_, srcs, _) in items {
+            let mut coord = [None; 4];
+            for (i, s) in srcs.iter().enumerate() {
+                if let Some(a) = s {
+                    coord[i] = Some(self.mov(*a));
+                }
+            }
+            self.p.groups.push(coord);
+            coords.push(coord);
+        }
+        let mut out = Vec::new();
+        for ((inst, _, want), coord) in items.iter().zip(coords) {
+            let dst = if *want {
+                [Some(self.fresh()), Some(self.fresh()), Some(self.fresh()), Some(self.fresh())]
+            } else {
+                [None; 4]
+            };
+            if *want {
+                self.p.groups.push(dst);
+                out.extend(dst.iter().map(|d| Arg::v(d.unwrap())));
+            }
+            self.push(Inst::Tex { inst: *inst, coord, dst, resource, sampler, offset, normalized: true });
+        }
+        Ok(out)
     }
 
     /// A texture-clause instruction: sources copied into one register, four results in another.
@@ -1721,6 +1786,50 @@ impl<'a> Lower<'a> {
                         acc = self.iop(op2::OR_INT, acc, sh);
                     }
                     return Ok(vec![acc]);
+                }
+                (M::CountLeadingZeros, _) => {
+                    // binary search: 16, 8, 4, 2, 1 leading zero bits at a time
+                    let mut v = self.plain(x);
+                    let mut n = Arg::imm(0);
+                    for k in [16u32, 8, 4, 2, 1] {
+                        let limit = if k == 32 { 0 } else { (1u32 << (32 - k)) - 1 };
+                        let small = self.iop(op2::SETGE_UINT, Arg::imm(limit), v);
+                        let add = self.iop(op2::AND_INT, small, Arg::imm(k));
+                        n = self.iop(op2::ADD_INT, n, add);
+                        let shifted = self.iop(op2::LSHL_INT, v, Arg::imm(k));
+                        v = self.select(small, shifted, v);
+                    }
+                    let zero = self.iop(op2::SETE_INT, x, Arg::imm(0));
+                    self.select(zero, Arg::imm(32), n)
+                }
+                (M::CountTrailingZeros, _) => {
+                    let mut v = self.plain(x);
+                    let mut n = Arg::imm(0);
+                    for k in [16u32, 8, 4, 2, 1] {
+                        let low = self.iop(op2::AND_INT, v, Arg::imm((1u32 << k) - 1));
+                        let none = self.iop(op2::SETE_INT, low, Arg::imm(0));
+                        let add = self.iop(op2::AND_INT, none, Arg::imm(k));
+                        n = self.iop(op2::ADD_INT, n, add);
+                        let shifted = self.iop(op2::LSHR_INT, v, Arg::imm(k));
+                        v = self.select(none, shifted, v);
+                    }
+                    let zero = self.iop(op2::SETE_INT, x, Arg::imm(0));
+                    self.select(zero, Arg::imm(32), n)
+                }
+                (M::CountOneBits, _) => {
+                    let v = self.plain(x);
+                    let h = self.iop(op2::LSHR_INT, v, Arg::imm(1));
+                    let h = self.iop(op2::AND_INT, h, Arg::imm(0x5555_5555));
+                    let v = self.iop(op2::SUB_INT, v, h);
+                    let lo = self.iop(op2::AND_INT, v, Arg::imm(0x3333_3333));
+                    let hi = self.iop(op2::LSHR_INT, v, Arg::imm(2));
+                    let hi = self.iop(op2::AND_INT, hi, Arg::imm(0x3333_3333));
+                    let v = self.iop(op2::ADD_INT, lo, hi);
+                    let h = self.iop(op2::LSHR_INT, v, Arg::imm(4));
+                    let v = self.iop(op2::ADD_INT, v, h);
+                    let v = self.iop(op2::AND_INT, v, Arg::imm(0x0F0F_0F0F));
+                    let v = self.iop(op2::MULLO_UINT, v, Arg::imm(0x0101_0101));
+                    self.iop(op2::LSHR_INT, v, Arg::imm(24))
                 }
                 (other, k) => return unsupported(format!("{other:?} on {k:?}")),
             });

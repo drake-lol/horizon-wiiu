@@ -211,3 +211,40 @@ fn texture_sample_and_storage_fetch() {
     let out = m.run(&s.code);
     close(out.get(0, 0).unwrap(), [0.5, 2.0, 5.0, 6.0]);
 }
+
+#[test]
+fn bit_counting() {
+    let body = "fn f(a: vec4f) -> vec4f {
+        let x = u32(a.x);
+        return vec4(f32(countLeadingZeros(x)), f32(countTrailingZeros(x)), f32(countOneBits(x)), 0.0);
+    }";
+    close(frag(body, [40.0, 0.0, 0.0, 0.0]), [26.0, 3.0, 2.0, 0.0]);
+    close(frag(body, [1.0, 0.0, 0.0, 0.0]), [31.0, 0.0, 1.0, 0.0]);
+    close(frag(body, [0.0, 0.0, 0.0, 0.0]), [32.0, 32.0, 0.0, 0.0]);
+}
+
+#[test]
+fn gradient_sampling_stays_in_one_clause() {
+    let src = "
+@group(0) @binding(0) var t: texture_2d<f32>;
+@group(0) @binding(1) var s: sampler;
+@fragment fn main(@location(0) uv: vec2f) -> @location(0) vec4f {
+    return textureSampleGrad(t, s, uv, vec2(0.5, 0.0), vec2(0.0, 0.25));
+}";
+    let mut opts = Options::default();
+    opts.textures.insert(rb(0, 0), 0);
+    opts.samplers.insert(rb(0, 1), 0);
+    let s = build(src, ShaderStage::Fragment, "main", &opts);
+    let seen = std::cell::RefCell::new(Vec::new());
+    let mut m = Machine::new();
+    m.tex = Box::new(|inst, _, _, c| {
+        seen.borrow_mut().push((inst, f32::from_bits(c[0]), f32::from_bits(c[1])));
+        c
+    });
+    m.set(0, [0.75, 0.125, 0.0, 0.0]);
+    let out = m.run(&s.code);
+    drop(m);
+    // SET_GRADIENTS_H, SET_GRADIENTS_V, SAMPLE_G with their own operands
+    assert_eq!(*seen.borrow(), vec![(0x0B, 0.5, 0.0), (0x0C, 0.0, 0.25), (0x14, 0.75, 0.125)]);
+    close(out.get(0, 0).unwrap(), [0.75, 0.125, 0.0, 0.0]);
+}
