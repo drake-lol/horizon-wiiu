@@ -72,6 +72,8 @@ pub enum Event {
     /// A chunk column: block ids per 16-high section from the lowest one (`4096` bytes each, y-major).
     Chunk { x: i32, z: i32, min_y: i32, sections: Vec<Vec<u16>>, light: Vec<Vec<u8>> },
     Block { pos: [i32; 3], block: u16 },
+    /// The server dropped a chunk column from the player's view.
+    Forget { x: i32, z: i32 },
     Closed(String),
 }
 
@@ -315,6 +317,12 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
                         }
                         Err(e) => println!("net: chunk {},{} did not decode: {e}", p.x, p.z),
                     }
+                }
+                Ok(())
+            }
+            cb::FORGET_LEVEL_CHUNK => {
+                if let Ok(play::Clientbound::ForgetLevelChunk(p)) = play::Clientbound::decode(id, &body) {
+                    let _ = tx.send(Event::Forget { x: p.pos[0], z: p.pos[1] });
                 }
                 Ok(())
             }

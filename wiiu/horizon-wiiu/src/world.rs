@@ -221,6 +221,12 @@ impl World {
         self.blocks.get(i).copied().unwrap_or(0)
     }
 
+    /// Empty the window (before it moves).
+    pub fn clear(&mut self) {
+        self.blocks.iter_mut().for_each(|b| *b = 0);
+        self.light.iter_mut().for_each(|l| *l = 15);
+    }
+
     pub fn set_light(&mut self, x: usize, y: usize, z: usize, l: u8) {
         let i = (y * self.sz + z) * self.sx + x;
         if let Some(slot) = self.light.get_mut(i) {
