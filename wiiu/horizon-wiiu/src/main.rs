@@ -250,6 +250,7 @@ fn main() {
     let mut game = Game { world, player: Player::new(spawn), meshes, retired: Vec::new(), dirty: Vec::new(), selected: 0, cooldown: 0, frame: 0, origin: [0; 3], spawned: net.is_none(), pending: Vec::new() };
     let mut manual = false;
     let mut last_move = std::time::Instant::now();
+    let mut loaded_at: Option<std::time::Instant> = None;
     let mut broke = 0u32;
     let mut placed = 0u32;
 
@@ -298,7 +299,13 @@ fn main() {
         }
         // The server allows one position packet per 50 ms tick and kicks for two ("Invalid move player packet"),
         // so send by the clock, not by frame count: Cemu delivers frames in bursts.
-        if let (Some(n), true) = (&net, game.spawned && last_move.elapsed() >= std::time::Duration::from_millis(55)) {
+        if net.is_some() && net::loaded() && loaded_at.is_none() {
+            loaded_at = Some(std::time::Instant::now());
+        }
+        // one position packet per 100 ms (two server ticks), starting a second after PlayerLoaded: a server still
+        // generating its first chunks stalls its tick, and moves queued into one tick are a kick
+        let moving = loaded_at.is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(1000));
+        if let (Some(n), true) = (&net, game.spawned && moving && last_move.elapsed() >= std::time::Duration::from_millis(100)) {
             last_move = std::time::Instant::now();
             let p = &game.player;
             n.move_to([p.pos[0] as f64 + game.origin[0] as f64, p.pos[1] as f64 + game.origin[1] as f64, p.pos[2] as f64 + game.origin[2] as f64], p.on_ground);

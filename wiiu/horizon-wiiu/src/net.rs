@@ -32,6 +32,13 @@ pub struct Net {
     shared: Arc<Shared>,
 }
 
+/// Set once `PlayerLoaded` has been sent: the server ignores a player's moves until then.
+static LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn loaded() -> bool {
+    LOADED.load(Ordering::SeqCst)
+}
+
 impl Net {
     /// Tell the server where the player is (`MovePlayerPos`), so it keeps their chunks loaded and sees them move.
     pub fn move_to(&self, pos: [f64; 3], on_ground: bool) {
@@ -246,7 +253,15 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
             }
             cb::CHUNK_BATCH_FINISHED => {
                 let _ = batch_started;
-                shared.send(&play::Serverbound::ChunkBatchReceived(play::ChunkBatchReceived { chunks_per_tick: 9.0 }).encode())
+                let r = shared.send(&play::Serverbound::ChunkBatchReceived(play::ChunkBatchReceived { chunks_per_tick: 9.0 }).encode());
+                // vanilla's loading screen ends, and the client says so, once the first chunks are in
+                if r.is_ok() && !LOADED.load(Ordering::SeqCst) {
+                    LOADED.store(true, Ordering::SeqCst);
+                    println!("net: sending PlayerLoaded");
+                    shared.send(&play::Serverbound::PlayerLoaded(Empty).encode())
+                } else {
+                    r
+                }
             }
             cb::PLAYER_POSITION => match play::Clientbound::decode(id, &body) {
                 Ok(play::Clientbound::PlayerPosition(p)) => {
