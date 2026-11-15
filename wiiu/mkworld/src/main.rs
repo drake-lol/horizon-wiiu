@@ -42,6 +42,7 @@ fn block_tag(b: world::Block) -> Tag {
 
 fn main() {
     let dir = std::env::args().nth(1).expect("usage: mkworld <output-dir>");
+    if dir == "--mesh" { mesh_check(); return; }
     std::fs::create_dir_all(&dir).unwrap();
     let path = std::path::Path::new(&dir).join("r.0.0.mca");
     let _ = std::fs::remove_file(&path);
@@ -87,4 +88,12 @@ fn main() {
     }
     writer.finish().unwrap();
     println!("wrote {}", path.display());
+}
+
+#[allow(dead_code)]
+fn mesh_check() {
+    let world = world::World::generate();
+    let t = std::time::Instant::now();
+    let v = world.mesh_chunk(0, 0);
+    println!("mesh 0,0: {} verts in {:?}", v.len(), t.elapsed());
 }
