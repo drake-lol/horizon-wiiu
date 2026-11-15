@@ -58,3 +58,26 @@ t = t.replace("s! {", "const DIRENT_NAME_OFFSET: usize = if cfg!(target_vendor =
 open(v, "w").write(t)
 print("patched", v)
 
+# --- stat: devkitPPC's `struct stat` is 96 bytes with `struct timespec` times (16 bytes each, at 32/48/64) and
+# st_blksize at 80. The Vita layout in libc is 72 bytes, so fstat() overran the caller's buffer and smashed the
+# stack. Keep the Vita field names (std uses st_mtime etc.) and add the nanosecond and padding fields.
+t = open(v).read()
+for name in ("atime", "mtime", "ctime"):
+    old = f"        pub st_{name}: crate::time_t,\n"
+    assert old in t, name
+    t = t.replace(old, old
+        + f"        #[cfg(target_vendor = \"wiiu\")]\n        pub st_{name}_nsec: crate::c_long,\n"
+        + f"        #[cfg(target_vendor = \"wiiu\")]\n        __st_{name}_pad: Padding<crate::c_int>,\n", 1)
+t += """
+#[cfg(target_vendor = "wiiu")]
+const _: () = {
+    assert!(core::mem::size_of::<stat>() == 96);
+    assert!(core::mem::offset_of!(stat, st_size) == 24);
+    assert!(core::mem::offset_of!(stat, st_mtime) == 48);
+    assert!(core::mem::offset_of!(stat, st_blksize) == 80);
+    assert!(core::mem::offset_of!(dirent, d_name) == 105);
+};
+"""
+open(v, "w").write(t)
+print("patched stat", v)
+
