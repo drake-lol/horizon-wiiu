@@ -3,7 +3,9 @@
 
 pub const TILE: usize = 16;
 pub const TILES_PER_ROW: usize = 4;
-pub const SIZE: usize = TILE * TILES_PER_ROW;
+pub const ROWS: usize = 5;
+pub const WIDTH: usize = TILE * TILES_PER_ROW;
+pub const HEIGHT: usize = TILE * ROWS;
 
 pub const GRASS_TOP: usize = 0;
 pub const GRASS_SIDE: usize = 1;
@@ -21,6 +23,8 @@ pub const SANDSTONE: usize = 12;
 pub const ICE: usize = 13;
 pub const LAVA: usize = 14;
 pub const BEDROCK: usize = 15;
+/// Solid white, tinted by vertex colour for the HUD.
+pub const WHITE: usize = 16;
 
 fn noise(tile: usize, x: usize, y: usize) -> f32 {
     let mut h = (tile as u32).wrapping_mul(0x9e37_79b9) ^ (x as u32).wrapping_mul(0x85eb_ca6b) ^ (y as u32).wrapping_mul(0xc2b2_ae35);
@@ -74,19 +78,20 @@ fn pixel(tile: usize, x: usize, y: usize) -> [u8; 4] {
         ICE => shade([145.0, 180.0, 245.0], 0.92 + 0.12 * n),
         LAVA => shade([230.0, 110.0, 25.0], 0.7 + 0.5 * n),
         BEDROCK => shade([70.0, 70.0, 70.0], 0.5 + 0.9 * n),
+        WHITE => [255, 255, 255, 255],
         _ => [255, 0, 255, 255],
     }
 }
 
-/// The atlas as RGBA bytes, row-major, `SIZE` x `SIZE`.
+/// The atlas as RGBA bytes, row-major, `WIDTH` x `HEIGHT`.
 pub fn build() -> Vec<u8> {
-    let mut out = vec![0u8; SIZE * SIZE * 4];
-    for tile in 0..TILES_PER_ROW * TILES_PER_ROW {
+    let mut out = vec![0u8; WIDTH * HEIGHT * 4];
+    for tile in 0..TILES_PER_ROW * ROWS {
         let (tx, ty) = (tile % TILES_PER_ROW, tile / TILES_PER_ROW);
         for y in 0..TILE {
             for x in 0..TILE {
                 let p = pixel(tile, x, y);
-                let o = ((ty * TILE + y) * SIZE + tx * TILE + x) * 4;
+                let o = ((ty * TILE + y) * WIDTH + tx * TILE + x) * 4;
                 out[o..o + 4].copy_from_slice(&p);
             }
         }
@@ -94,10 +99,14 @@ pub fn build() -> Vec<u8> {
     out
 }
 
-/// Texture coordinates of tile `tile`: (u0, v0, size), inset by half a texel against bleeding.
-pub fn uv_rect(tile: usize) -> (f32, f32, f32) {
+/// Texture coordinates of tile `tile`: (u0, v0, u size, v size), inset by half a texel against bleeding.
+pub fn uv_rect(tile: usize) -> (f32, f32, f32, f32) {
     let (tx, ty) = (tile % TILES_PER_ROW, tile / TILES_PER_ROW);
-    let texel = 1.0 / SIZE as f32;
-    let size = 1.0 / TILES_PER_ROW as f32;
-    (tx as f32 * size + texel * 0.5, ty as f32 * size + texel * 0.5, size - texel)
+    let (tu, tv) = (1.0 / WIDTH as f32, 1.0 / HEIGHT as f32);
+    (
+        (tx * TILE) as f32 * tu + tu * 0.5,
+        (ty * TILE) as f32 * tv + tv * 0.5,
+        TILE as f32 * tu - tu,
+        TILE as f32 * tv - tv,
+    )
 }

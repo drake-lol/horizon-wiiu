@@ -18,7 +18,12 @@ pub struct Gfx {
     group: Box<WHBGfxShaderGroup>,
     texture: Option<Box<GX2Texture>>,
     sampler: GX2Sampler,
+    hud: Option<Mesh>,
+    hud_count: u32,
 }
+
+/// Vertices the HUD buffer holds (two quads' worth per element, a few dozen elements).
+pub const HUD_CAPACITY: usize = 4096;
 
 unsafe extern "C" {
     fn memalign(align: usize, size: usize) -> *mut c_void;
@@ -27,6 +32,12 @@ unsafe extern "C" {
 pub struct Mesh {
     buffer: GX2RBuffer,
     pub vertices: u32,
+}
+
+impl Drop for Mesh {
+    fn drop(&mut self) {
+        unsafe { GX2RDestroyBufferEx(&mut self.buffer, 0) };
+    }
 }
 
 impl Gfx {
@@ -47,7 +58,9 @@ impl Gfx {
 
             let mut sampler: GX2Sampler = zeroed();
             GX2InitSampler(&mut sampler, GX2TexClampMode_GX2_TEX_CLAMP_MODE_CLAMP, GX2TexXYFilterMode_GX2_TEX_XY_FILTER_MODE_POINT);
-            Some(Gfx { group, texture: None, sampler })
+            let mut gfx = Gfx { group, texture: None, sampler, hud: None, hud_count: 0 };
+            gfx.hud = gfx.alloc(HUD_CAPACITY);
+            Some(gfx)
         }
     }
 
@@ -87,23 +100,44 @@ impl Gfx {
         }
     }
 
-    pub fn upload(&self, verts: &[Vertex]) -> Option<Mesh> {
-        if verts.is_empty() {
-            return None;
-        }
+    fn alloc(&self, capacity: usize) -> Option<Mesh> {
         unsafe {
             let mut buffer: GX2RBuffer = zeroed();
             buffer.flags = VERTEX_BUFFER_FLAGS;
             buffer.elemSize = size_of::<Vertex>() as u32;
-            buffer.elemCount = verts.len() as u32;
+            buffer.elemCount = capacity as u32;
             if GX2RCreateBuffer(&mut buffer) == 0 {
                 return None;
             }
-            let p = GX2RLockBufferEx(&mut buffer, 0) as *mut Vertex;
-            core::ptr::copy_nonoverlapping(verts.as_ptr(), p, verts.len());
-            GX2RUnlockBufferEx(&mut buffer, 0);
-            Some(Mesh { buffer, vertices: verts.len() as u32 })
+            Some(Mesh { buffer, vertices: 0 })
         }
+    }
+
+    pub fn upload(&self, verts: &[Vertex]) -> Option<Mesh> {
+        if verts.is_empty() {
+            return None;
+        }
+        let mut mesh = self.alloc(verts.len())?;
+        unsafe {
+            let p = GX2RLockBufferEx(&mut mesh.buffer, 0) as *mut Vertex;
+            core::ptr::copy_nonoverlapping(verts.as_ptr(), p, verts.len());
+            GX2RUnlockBufferEx(&mut mesh.buffer, 0);
+        }
+        mesh.vertices = verts.len() as u32;
+        Some(mesh)
+    }
+
+    /// Replace the HUD's quads (at most `HUD_CAPACITY` vertices); drawn on top of both screens.
+    pub fn set_hud(&mut self, verts: &[Vertex]) {
+        let n = verts.len().min(HUD_CAPACITY);
+        if let Some(h) = &mut self.hud {
+            unsafe {
+                let p = GX2RLockBufferEx(&mut h.buffer, 0) as *mut Vertex;
+                core::ptr::copy_nonoverlapping(verts.as_ptr(), p, n);
+                GX2RUnlockBufferEx(&mut h.buffer, 0);
+            }
+        }
+        self.hud_count = n as u32;
     }
 
     pub fn begin_frame(&self) {
@@ -115,7 +149,7 @@ impl Gfx {
     }
 
     /// Draw one screen. `tv` picks the TV or the GamePad buffers.
-    pub fn draw_screen(&self, tv: bool, sky: [f32; 3], mvp: &Mat4, meshes: &mut [Mesh]) {
+    pub fn draw_screen(&mut self, tv: bool, sky: [f32; 3], mvp: &Mat4, ortho: &Mat4, meshes: &mut [Option<Mesh>]) {
         unsafe {
             if tv {
                 WHBGfxBeginRenderTV();
@@ -151,9 +185,20 @@ impl Gfx {
                 GX2SetPixelSampler(&self.sampler, 0);
             }
 
-            for mesh in meshes.iter_mut() {
+            for mesh in meshes.iter_mut().flatten() {
                 GX2RSetAttributeBuffer(&mut mesh.buffer, 0, size_of::<Vertex>() as u32, 0);
                 GX2DrawEx(GX2PrimitiveMode_GX2_PRIMITIVE_MODE_QUADS, mesh.vertices, 0, 1);
+            }
+
+            // HUD: no depth, no culling, orthographic
+            if self.hud_count > 0 {
+                if let Some(h) = &mut self.hud {
+                    GX2SetDepthOnlyControl(0, 0, GX2CompareFunction_GX2_COMPARE_FUNC_ALWAYS);
+                    GX2SetCullOnlyControl(GX2FrontFace_GX2_FRONT_FACE_CCW, 0, 0);
+                    GX2SetVertexUniformReg(0, 16, ortho.as_ptr() as *const c_void);
+                    GX2RSetAttributeBuffer(&mut h.buffer, 0, size_of::<Vertex>() as u32, 0);
+                    GX2DrawEx(GX2PrimitiveMode_GX2_PRIMITIVE_MODE_QUADS, self.hud_count, 0, 1);
+                }
             }
 
             if tv {

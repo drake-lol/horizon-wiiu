@@ -34,6 +34,11 @@ impl Block {
         !matches!(self, Block::Air | Block::Water | Block::Lava)
     }
 
+    /// The tile shown for the block in the hotbar.
+    pub fn icon_tile(self) -> usize {
+        self.tile(true, false)
+    }
+
     /// The atlas tile for a face: `up` is +Y, `down` is -Y, anything else a side.
     fn tile(self, up: bool, down: bool) -> usize {
         match self {
@@ -222,7 +227,7 @@ impl World {
                         }
                         let k = (shade * tint * 255.0).min(255.0) as u8;
                         let color = [k, k, k, 255];
-                        let (u0, v0, size) = atlas::uv_rect(b.tile(n[1] == 1, n[1] == -1));
+                        let (u0, v0, su, sv) = atlas::uv_rect(b.tile(n[1] == 1, n[1] == -1));
                         // which of the quad's two axes runs up the face
                         let u_vertical = u[1] != 0.0 && v[1] == 0.0;
                         let p = [x as f32 + o[0], y as f32 + o[1], z as f32 + o[2]];
@@ -231,7 +236,7 @@ impl World {
                             Vertex {
                                 pos: [p[0] + u[0] * a + v[0] * c, p[1] + u[1] * a + v[1] * c, p[2] + u[2] * a + v[2] * c, 1.0],
                                 color,
-                                uv: [u0 + h * size, v0 + vert * size],
+                                uv: [u0 + h * su, v0 + vert * sv],
                             }
                         };
                         out.push(corner(0.0, 0.0));
