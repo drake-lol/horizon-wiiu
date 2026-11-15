@@ -45,6 +45,13 @@ Cemu lacks `nsysnet.set_multicast_state`, so test builds use the `skip-socket-in
   window/input/GX2 layer; this is the main remaining work.
 - Thread-exit destructors for pthread keys are not run; no real TLS (`has-thread-local` is false).
 
+## Playing it (placeholder assets)
+`horizon-wiiu/` is playable with generated placeholder textures and a procedural fallback world:
+left stick walks, right stick looks, A jumps, ZR breaks the targeted block, ZL places the selected one, L/R change the
+selection (9-slot hotbar). Physics are an axis-aligned box with gravity; edits remesh the touched chunks live.
+With no controller input a scripted demo (walk, jump, break, place, cycle the hotbar) plays, so headless Cemu runs
+exercise the same code; progress lines (`frame N pos ... broke= placed=`) appear in Cemu's log.
+
 ## Findings worth keeping (things that cost hours)
 - **Cemu hangs on PowerPC condition-register logic** (`cror`, `crnand`, ...): a meshing loop spun forever. The target spec
   now carries `-crbits`, which removes them. Real hardware was not tested.
