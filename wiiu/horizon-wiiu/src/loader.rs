@@ -98,7 +98,7 @@ pub fn load() -> Option<World> {
     None
 }
 
-fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
+pub fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
     let mut region = RegionFile::open(path).ok()?;
     // pass 1: find which chunks exist and the lowest / highest non-air sections
     let mut chunks = Vec::new();
@@ -123,6 +123,7 @@ fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
             chunks.push((cx, cz, root));
         }
     }
+    println!("loader: {} chunk(s), sections {lo}..={hi}", chunks.len());
     if chunks.is_empty() || lo > hi {
         return None;
     }
@@ -139,6 +140,11 @@ fn load_region(path: &str, rx: i32, rz: i32) -> Option<World> {
             }
             let Some(container) = s.get("block_states").and_then(|c| PalettedContainer::from_nbt(c, 4096, 4).ok()) else { continue };
             names.clear();
+            if *cx == 0 && *cz == 0 {
+                let sample = container.get(0).ok().and_then(|t| BlockState::from_nbt(t).ok()).map(|b| b.name);
+                let mid = container.get(2048).ok().and_then(|t| BlockState::from_nbt(t).ok()).map(|b| b.name);
+                println!("loader: section Y={y} palette={} bits={} [0]={sample:?} [2048]={mid:?}", container.palette_len(), container.bits());
+            }
             for i in 0..4096 {
                 let Ok(tag) = container.get(i) else { continue };
                 let key = tag as *const Tag as usize;

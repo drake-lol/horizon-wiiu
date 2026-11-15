@@ -5,6 +5,9 @@
 #[path = "../../horizon-wiiu/src/atlas.rs"]
 #[allow(dead_code)]
 mod atlas;
+#[path = "../../horizon-wiiu/src/loader.rs"]
+#[allow(dead_code)]
+mod loader;
 #[path = "../../horizon-wiiu/src/world.rs"]
 #[allow(dead_code)]
 mod world;
@@ -43,6 +46,16 @@ fn block_tag(b: world::Block) -> Tag {
 fn main() {
     let dir = std::env::args().nth(1).expect("usage: mkworld <output-dir>");
     if dir == "--mesh" { mesh_check(); return; }
+    if dir == "--load" {
+        let path = std::env::args().nth(2).expect("--load <r.X.Z.mca>");
+        let w = loader::load_region(&path, 0, 0).expect("load failed");
+        let mut counts = std::collections::BTreeMap::new();
+        for y in 0..w.sy as i32 { for z in 0..w.sz as i32 { for x in 0..w.sx as i32 {
+            *counts.entry(format!("{}", w.get(x, y, z) as u8)).or_insert(0usize) += 1;
+        } } }
+        println!("loaded {}x{}x{} y0={}: block-id counts {:?}", w.sx, w.sy, w.sz, w.y0, counts);
+        return;
+    }
     std::fs::create_dir_all(&dir).unwrap();
     let path = std::path::Path::new(&dir).join("r.0.0.mca");
     let _ = std::fs::remove_file(&path);
