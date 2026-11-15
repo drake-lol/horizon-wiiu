@@ -272,13 +272,15 @@ impl State {
                 Cmd::BlendConstants([r, g, b, a]) => GX2SetBlendConstantColor(*r, *g, *b, *a),
                 Cmd::Draw { first_vertex, vertex_count, first_instance, instance_count } => {
                     if let Some(p) = self.ready() {
-                        self.bind(&*p);
+                        let p = &*p;
+                        self.bind(p);
                         GX2DrawEx2(p.mode, *vertex_count, *first_vertex, *instance_count, *first_instance);
                     }
                 }
                 Cmd::DrawIndexed { first_index, index_count, base_vertex, first_instance, instance_count } => {
                     if let (Some(p), Some((ptr, wide))) = (self.ready(), self.index) {
-                        self.bind(&*p);
+                        let p = &*p;
+                        self.bind(p);
                         let (ty, size) = if wide {
                             (GX2IndexType_GX2_INDEX_TYPE_U32, 4)
                         } else {
