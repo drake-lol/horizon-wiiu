@@ -164,8 +164,9 @@ impl Window {
         Err(unsupported())
     }
 
-    pub fn set_cursor_grab(&self, _mode: window::CursorGrabMode) -> Result<(), error::ExternalError> {
-        Err(unsupported())
+    pub fn set_cursor_grab(&self, mode: window::CursorGrabMode) -> Result<(), error::ExternalError> {
+        super::GRABBED.store(mode != window::CursorGrabMode::None, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     pub fn set_cursor_visible(&self, _visible: bool) {}

@@ -29,18 +29,43 @@ impl<T: 'static> EventLoop<T> {
         })
     }
 
-    /// Starts the application and returns: the Wii U client runs its own frame loop.
+    /// Runs the application while the Wii U keeps it in the foreground: a frame per pass (the surface's
+    /// acquire waits for the TV's vsync), GamePad input as keyboard and mouse events.
     pub fn run<F>(self, mut handler: F) -> Result<(), EventLoopError>
     where
         F: FnMut(event::Event<T>, &event_loop::ActiveEventLoop),
     {
-        handler(event::Event::NewEvents(StartCause::Init), &self.window_target);
-        handler(event::Event::Resumed, &self.window_target);
-        while let Ok(e) = self.user_events_receiver.try_recv() {
-            handler(event::Event::UserEvent(e), &self.window_target);
+        let target = &self.window_target;
+        handler(event::Event::NewEvents(StartCause::Init), target);
+        handler(event::Event::Resumed, target);
+        let window = crate::window::WindowId(super::WindowId(0));
+        let send = |handler: &mut F, e: event::WindowEvent| handler(event::Event::WindowEvent { window_id: window, event: e }, target);
+        let mut first = true;
+        let mut pad = super::pad::Mapper::default();
+        while super::pad::running() && !target.p.exiting() {
+            handler(event::Event::NewEvents(StartCause::Poll), target);
+            if first {
+                let (w, h) = super::SCREEN;
+                send(&mut handler, event::WindowEvent::Resized(crate::dpi::PhysicalSize::new(w, h)));
+                send(&mut handler, event::WindowEvent::Focused(true));
+                first = false;
+            }
+            while let Ok(e) = self.user_events_receiver.try_recv() {
+                handler(event::Event::UserEvent(e), target);
+            }
+            for e in pad.poll() {
+                match e {
+                    super::pad::Out::Window(e) => send(&mut handler, e),
+                    super::pad::Out::Device(e) => handler(
+                        event::Event::DeviceEvent { device_id: crate::event::DeviceId(super::DeviceId), event: e },
+                        target,
+                    ),
+                }
+            }
+            send(&mut handler, event::WindowEvent::RedrawRequested);
+            handler(event::Event::AboutToWait, target);
         }
-        handler(event::Event::AboutToWait, &self.window_target);
-        handler(event::Event::LoopExiting, &self.window_target);
+        handler(event::Event::LoopExiting, target);
         Ok(())
     }
 

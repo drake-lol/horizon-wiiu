@@ -14,7 +14,12 @@ pub(crate) use self::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy, Ow
 mod event_loop;
 
 pub use self::window::Window;
+mod pad;
 mod window;
+
+/// The game asked for the pointer locked (mouse look): the right stick then turns the view instead of moving
+/// the menu cursor.
+pub(crate) static GRABBED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The TV picture GX2 renders (WHBGfx's default TV mode).
 pub(crate) const SCREEN: (u32, u32) = (1280, 720);
