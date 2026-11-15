@@ -228,17 +228,6 @@ static ScanBuffers sScanTV, sScanDRC;
 
 static void noteScanBuffers(ScanBuffers &sb, void *buffer, uint32_t size, uint32_t w, uint32_t h, GX2SurfaceFormat format,
                             GX2BufferingMode mode) {
-    GX2Surface s{};
-    s.dim       = GX2_SURFACE_DIM_TEXTURE_2D;
-    s.width     = w;
-    s.height    = h;
-    s.depth     = 1;
-    s.mipLevels = 1;
-    s.format    = format;
-    s.aa        = GX2_AA_MODE1X;
-    s.use       = GX2_SURFACE_USE_TEXTURE;
-    s.tileMode  = GX2_TILE_MODE_LINEAR_ALIGNED;
-    GX2CalcSurfaceSizeAndAlignment(&s);
     uint32_t count = mode == GX2_BUFFERING_MODE_TRIPLE ? 3 : mode == GX2_BUFFERING_MODE_DOUBLE ? 2 : 1;
     std::lock_guard<std::mutex> lock(sShotLock);
     sb           = ScanBuffers{};
@@ -246,15 +235,18 @@ static void noteScanBuffers(ScanBuffers &sb, void *buffer, uint32_t size, uint32
     sb.buffering = mode;
     sb.format    = format;
     sb.count     = count;
-    if (!buffer || w == 0 || size / count == 0) {
+    if (!buffer || w == 0) {
         return;
+    }
+    if (size / count < ((w + 31) & ~31u) * ((h + 15) & ~15u) * 4) {
+        return; // not the layout this plugin knows
     }
     sb.base   = (uint8_t *) buffer;
     sb.stride = size / count;
     sb.count  = count;
     sb.width  = w;
     sb.height = h;
-    sb.pitch  = s.pitch;
+    sb.pitch  = (w + 31) & ~31u; // the tiled layout's pitch: whole 32-pixel macro tiles
     sb.format = format;
 }
 
@@ -288,10 +280,22 @@ WUPS_MUST_REPLACE(GX2SetDRCBuffer, WUPS_LOADER_LIBRARY_GX2, GX2SetDRCBuffer);
 // GX2CopySurface, which hung real consoles, and GX2GetLastFrame returns a frame saved at start-up, not the live one.
 static const uint32_t kMark = 0x13579BDF;
 
+/// Byte offset of pixel (x, y) in a 32-bit 2D_TILED_THIN1 surface with no swizzle: how the system lays out scan
+/// buffers (Latte's addrlib, 2 pipes, 4 banks, 256-byte pipe interleave; checked against the Wii U Menu's TV and
+/// GamePad buffers).
+static inline uint32_t tiledOffset(uint32_t x, uint32_t y, uint32_t pitch) {
+    uint32_t pixel = (x & 1) | (x & 2) | ((y & 1) << 2) | ((x & 4) << 1) | ((y & 2) << 3) | ((y & 4) << 3);
+    uint32_t pipe  = ((y >> 3) ^ (x >> 3)) & 1;
+    uint32_t bank  = (((y >> 5) ^ (x >> 3)) & 1) | ((((y >> 4) ^ (x >> 4)) & 1) << 1);
+    uint32_t macro = ((x >> 5) + (pitch >> 5) * (y >> 4)) * (32 * 16 * 4);
+    uint32_t total = pixel * 4 + (macro >> 3);
+    return (bank << 9) | (pipe << 8) | (total & 0xFF) | ((total & ~0xFFu) << 3);
+}
+
 static uint32_t *markAt(const ScanBuffers &sb, uint32_t slot, int i) {
     uint32_t x = i == 0 ? 1 : i == 1 ? sb.width / 2 : sb.width - 2;
     uint32_t y = i == 0 ? 1 : i == 1 ? sb.height / 2 : sb.height - 2;
-    size_t off = (((size_t) y * sb.pitch + x) * 4) % sb.stride; // the layout may be tiled: any word in the slot will do
+    size_t off = tiledOffset(x, y, sb.pitch);
     return (uint32_t *) (sb.base + (size_t) slot * sb.stride + off);
 }
 
@@ -322,16 +326,15 @@ static int writtenSlot(const ScanBuffers &sb) {
 
 static void readSlot(const ScanBuffers &sb, uint32_t slot) {
     const uint8_t *px = sb.base + (size_t) slot * sb.stride;
-    DCInvalidateRange((void *) px, sb.pitch * sb.height * 4);
+    DCInvalidateRange((void *) px, sb.stride);
     uint32_t fmt   = sb.format & 0x3F;
     uint32_t scale = sShotScale ? sShotScale : 1;
     uint32_t w = sb.width / scale, h = sb.height / scale;
     sShotRgb.resize((size_t) w * h * 3);
     for (uint32_t y = 0; y < h; y++) {
-        const uint8_t *row = px + (size_t) (y * scale) * sb.pitch * 4;
-        uint8_t *out       = &sShotRgb[(size_t) y * w * 3];
+        uint8_t *out = &sShotRgb[(size_t) y * w * 3];
         for (uint32_t x = 0; x < w; x++) {
-            const uint8_t *p = row + (size_t) (x * scale) * 4;
+            const uint8_t *p = px + tiledOffset(x * scale, y * scale, sb.pitch);
             if (fmt == 0x19) {
                 // R10G10B10A2, a little-endian dword
                 uint32_t v = p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t) p[3] << 24);
@@ -371,7 +374,7 @@ DECL_FUNCTION(void, GX2CopyColorBufferToScanBuffer, const GX2ColorBuffer *colorB
     }
     sShotError.clear();
     if (!sb->base) {
-        sShotError = "the application set its scan buffers before the plugin loaded";
+        sShotError = "scan buffers unknown: set before the plugin loaded, or a layout it does not read";
     } else {
         GX2DrawDone(); // the application's own copy, finished
         int slot = writtenSlot(*sb);
