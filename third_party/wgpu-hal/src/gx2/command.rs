@@ -70,6 +70,7 @@ impl CommandBuffer {
     pub(crate) unsafe fn replay(&self, shared: &mut Shared) {
         let mut st = State::default();
         for c in &self.commands {
+            super::trace!("gx2: {c:?}");
             unsafe { st.run(c, shared) };
         }
     }

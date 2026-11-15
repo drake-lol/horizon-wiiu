@@ -35,6 +35,18 @@ mod command;
 mod conv;
 mod shader;
 
+/// Print what the backend does (to the console / Cemu's log), while it is brought up.
+pub(crate) const TRACE: bool = true;
+
+macro_rules! trace {
+    ($($t:tt)*) => {
+        if $crate::gx2::TRACE {
+            std::println!($($t)*);
+        }
+    };
+}
+pub(crate) use trace;
+
 pub use command::CommandBuffer;
 
 #[derive(Clone, Debug)]
@@ -59,6 +71,7 @@ impl GpuMem {
         // SAFETY: non-zero size.
         let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
         assert!(!ptr.is_null(), "GX2: out of memory ({size} bytes)");
+        trace!("gx2: alloc {:p} +{:#x}", ptr, layout.size());
         // the zeroes reach memory before the GPU reads it
         unsafe { GX2Invalidate(GX2InvalidateMode_GX2_INVALIDATE_MODE_CPU, ptr.cast(), layout.size() as u32) };
         GpuMem { ptr, size: layout.size(), layout }
@@ -67,6 +80,7 @@ impl GpuMem {
 
 impl Drop for GpuMem {
     fn drop(&mut self) {
+        trace!("gx2: free {:p}", self.ptr);
         // SAFETY: allocated with this layout.
         unsafe { std::alloc::dealloc(self.ptr, self.layout) }
     }
@@ -612,6 +626,7 @@ impl crate::Queue for Queue {
         (fence, fence_value): (&Fence, crate::FenceValue),
     ) -> DeviceResult<()> {
         let mut shared = self.shared.lock().unwrap();
+        trace!("gx2: submit {} buffers, fence {}", command_buffers.len(), fence_value);
         for cb in command_buffers {
             // SAFETY: wgpu-core keeps every resource the commands use alive until the fence passes.
             unsafe { cb.replay(&mut shared) };
