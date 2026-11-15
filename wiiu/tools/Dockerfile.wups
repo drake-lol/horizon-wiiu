@@ -2,4 +2,5 @@
 FROM ghcr.io/wiiu-env/devkitppc:latest
 COPY --from=ghcr.io/wiiu-env/wiiupluginsystem:latest /artifacts $DEVKITPRO
 COPY --from=ghcr.io/wiiu-env/libmappedmemory:latest /artifacts $DEVKITPRO
+COPY --from=ghcr.io/wiiu-env/librpxloader:latest /artifacts $DEVKITPRO
 WORKDIR /project
