@@ -1,0 +1,4 @@
+# Wii U plugin (WUPS) toolchain for wiiu/testbridge: devkitPPC + wut + the Wii U Plugin System.
+FROM ghcr.io/wiiu-env/devkitppc:latest
+COPY --from=ghcr.io/wiiu-env/wiiupluginsystem:latest /artifacts $DEVKITPRO
+WORKDIR /project
