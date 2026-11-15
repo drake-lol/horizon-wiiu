@@ -320,6 +320,59 @@ pub unsafe extern "C" fn pthread_setspecific(key: c_uint, value: usize) -> c_int
     })
 }
 
+/// Forget every value `thread` set: a new thread may be created at a dead one's address.
+fn forget_thread(thread: usize) {
+    with(|| {
+        let t = unsafe { &mut *KEYS.0.get() };
+        for e in t.entries.iter_mut() {
+            if e.0 == thread {
+                e.0 = 0;
+            }
+        }
+    })
+}
+
+type ThreadStart = unsafe extern "C" fn(*mut u8) -> *mut u8;
+
+extern "C" {
+    fn __real_pthread_create(thread: *mut u8, attr: *const u8, start: ThreadStart, arg: *mut u8) -> c_int;
+    fn malloc(size: usize) -> *mut u8;
+    fn free(p: *mut u8);
+}
+
+unsafe extern "C" fn thread_trampoline(pair: *mut u8) -> *mut u8 {
+    unsafe {
+        let start: ThreadStart = core::mem::transmute((pair as *const usize).read());
+        let arg = (pair as *const usize).add(1).read() as *mut u8;
+        free(pair);
+        let me = OSGetCurrentThread() as usize;
+        forget_thread(me);
+        let r = start(arg);
+        forget_thread(me);
+        r
+    }
+}
+
+/// Linked with `--wrap=pthread_create` (wiiu/tools/bldrpx.sh): each thread starts and ends with no
+/// thread-specific values, so one created where a finished thread's OSThread was does not inherit them
+/// (std aborted: "thread::set_current should only be called once per thread").
+#[no_mangle]
+pub unsafe extern "C" fn __wrap_pthread_create(thread: *mut u8, attr: *const u8, start: ThreadStart, arg: *mut u8) -> c_int {
+    unsafe {
+        let pair = malloc(2 * core::mem::size_of::<usize>());
+        if pair.is_null() {
+            return EAGAIN;
+        }
+        (pair as *mut usize).write(start as usize);
+        (pair as *mut usize).add(1).write(arg as usize);
+        let r = __real_pthread_create(thread, attr, thread_trampoline, pair);
+        if r != 0 {
+            free(pair);
+        }
+        r
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn pthread_getspecific(key: c_uint) -> usize {
     let me = unsafe { OSGetCurrentThread() } as usize;
