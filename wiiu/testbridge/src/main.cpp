@@ -214,32 +214,112 @@ static std::string sShotError;
 static uint32_t sShotW = 0, sShotH = 0;
 static std::vector<uint8_t> sShotRgb;
 
-/// Read the frame last sent to the screen. The scan buffers are linear memory the CPU reads, so this asks no
-/// work of the GPU (an earlier version copied the colour buffer with GX2CopySurface, which hung the GPU on
-/// real consoles).
-static void capture(GX2ScanTarget target) {
-    GX2Texture tex{};
-    if (!GX2GetLastFrame(target, &tex) || !tex.surface.image) {
-        sShotError = "no frame presented yet";
-        return;
-    }
-    const GX2Surface &src = tex.surface;
-    if (src.tileMode != GX2_TILE_MODE_LINEAR_ALIGNED && src.tileMode != GX2_TILE_MODE_LINEAR_SPECIAL) {
-        char msg[64];
-        snprintf(msg, sizeof msg, "scan buffer tile mode %u not linear", (unsigned) src.tileMode);
-        sShotError = msg;
-        return;
-    }
-    uint32_t bytes = src.pitch * src.height * 4;
-    DCInvalidateRange(src.image, bytes);
+/// Where an application's scan buffers are: the memory GX2 copies each finished frame into for the TV or the
+/// GamePad. Linear, CPU-readable, one per buffering slot.
+struct ScanBuffers {
+    uint8_t *base   = nullptr;
+    uint32_t stride = 0; // bytes from one slot to the next
+    uint32_t count  = 0;
+    uint32_t width = 0, height = 0, pitch = 0, format = 0;
+};
+static ScanBuffers sScanTV, sScanDRC;
 
-    uint32_t fmt   = src.format & 0x3F;
+static void noteScanBuffers(ScanBuffers &sb, void *buffer, uint32_t size, uint32_t w, uint32_t h, GX2SurfaceFormat format,
+                            GX2BufferingMode mode) {
+    GX2Surface s{};
+    s.dim       = GX2_SURFACE_DIM_TEXTURE_2D;
+    s.width     = w;
+    s.height    = h;
+    s.depth     = 1;
+    s.mipLevels = 1;
+    s.format    = format;
+    s.aa        = GX2_AA_MODE1X;
+    s.use       = GX2_SURFACE_USE_TEXTURE;
+    s.tileMode  = GX2_TILE_MODE_LINEAR_ALIGNED;
+    GX2CalcSurfaceSizeAndAlignment(&s);
+    uint32_t count = mode == GX2_BUFFERING_MODE_TRIPLE ? 3 : mode == GX2_BUFFERING_MODE_DOUBLE ? 2 : 1;
+    std::lock_guard<std::mutex> lock(sShotLock);
+    sb        = ScanBuffers{};
+    if (!buffer || w == 0 || count * s.imageSize > size) {
+        return;
+    }
+    sb.base   = (uint8_t *) buffer;
+    sb.stride = size / count;
+    sb.count  = count;
+    sb.width  = w;
+    sb.height = h;
+    sb.pitch  = s.pitch;
+    sb.format = format;
+}
+
+DECL_FUNCTION(void, GX2SetTVBuffer, void *buffer, uint32_t size, GX2TVRenderMode mode, GX2SurfaceFormat format,
+              GX2BufferingMode buffering) {
+    uint32_t w = 1280, h = 720;
+    switch (mode) {
+        case GX2_TV_RENDER_MODE_STANDARD_480P: w = 640; h = 480; break;
+        case GX2_TV_RENDER_MODE_WIDE_480P: w = 854; h = 480; break;
+        case GX2_TV_RENDER_MODE_WIDE_1080P: w = 1920; h = 1080; break;
+        case GX2_TV_RENDER_MODE_DISABLED: w = 0; h = 0; break;
+        default: break;
+    }
+    noteScanBuffers(sScanTV, buffer, size, w, h, format, buffering);
+    real_GX2SetTVBuffer(buffer, size, mode, format, buffering);
+}
+
+DECL_FUNCTION(void, GX2SetDRCBuffer, void *buffer, uint32_t size, GX2DrcRenderMode mode, GX2SurfaceFormat format,
+              GX2BufferingMode buffering) {
+    noteScanBuffers(sScanDRC, buffer, size, mode == GX2_DRC_RENDER_MODE_DISABLED ? 0 : 854, 480, format, buffering);
+    real_GX2SetDRCBuffer(buffer, size, mode, format, buffering);
+}
+
+WUPS_MUST_REPLACE(GX2SetTVBuffer, WUPS_LOADER_LIBRARY_GX2, GX2SetTVBuffer);
+WUPS_MUST_REPLACE(GX2SetDRCBuffer, WUPS_LOADER_LIBRARY_GX2, GX2SetDRCBuffer);
+
+// A frame is marked in a few pixels of every slot before the application's copy; the slot whose marks the copy
+// overwrote holds that frame. No GPU work is added: an earlier version copied the colour buffer with
+// GX2CopySurface, which hung real consoles, and GX2GetLastFrame returns a frame saved at start-up, not the live one.
+static const uint32_t kMark = 0x13579BDF;
+
+static uint32_t *markAt(const ScanBuffers &sb, uint32_t slot, int i) {
+    uint32_t x = i == 0 ? 1 : i == 1 ? sb.width / 2 : sb.width - 2;
+    uint32_t y = i == 0 ? 1 : i == 1 ? sb.height / 2 : sb.height - 2;
+    return (uint32_t *) (sb.base + (size_t) slot * sb.stride + ((size_t) y * sb.pitch + x) * 4);
+}
+
+static void markSlots(const ScanBuffers &sb) {
+    for (uint32_t slot = 0; slot < sb.count; slot++) {
+        for (int i = 0; i < 3; i++) {
+            uint32_t *p = markAt(sb, slot, i);
+            *p          = kMark;
+            DCFlushRange(p, 4);
+        }
+    }
+}
+
+static int writtenSlot(const ScanBuffers &sb) {
+    for (uint32_t slot = 0; slot < sb.count; slot++) {
+        int kept = 0;
+        for (int i = 0; i < 3; i++) {
+            uint32_t *p = markAt(sb, slot, i);
+            DCInvalidateRange(p, 4);
+            kept += *p == kMark;
+        }
+        if (kept < 3) {
+            return (int) slot;
+        }
+    }
+    return -1;
+}
+
+static void readSlot(const ScanBuffers &sb, uint32_t slot) {
+    const uint8_t *px = sb.base + (size_t) slot * sb.stride;
+    DCInvalidateRange((void *) px, sb.pitch * sb.height * 4);
+    uint32_t fmt   = sb.format & 0x3F;
     uint32_t scale = sShotScale ? sShotScale : 1;
-    uint32_t w = src.width / scale, h = src.height / scale;
+    uint32_t w = sb.width / scale, h = sb.height / scale;
     sShotRgb.resize((size_t) w * h * 3);
-    const uint8_t *px = (const uint8_t *) src.image;
     for (uint32_t y = 0; y < h; y++) {
-        const uint8_t *row = px + (size_t) (y * scale) * src.pitch * 4;
+        const uint8_t *row = px + (size_t) (y * scale) * sb.pitch * 4;
         uint8_t *out       = &sShotRgb[(size_t) y * w * 3];
         for (uint32_t x = 0; x < w; x++) {
             const uint8_t *p = row + (size_t) (x * scale) * 4;
@@ -262,23 +342,39 @@ static void capture(GX2ScanTarget target) {
     sShotH = h;
     if (fmt != 0x1A && fmt != 0x19) {
         char msg[64];
-        snprintf(msg, sizeof msg, "format %#x read as RGBA8", (unsigned) src.format);
+        snprintf(msg, sizeof msg, "format %#x read as RGBA8", (unsigned) sb.format);
         sShotError = msg; // a warning: the picture is still sent
     }
 }
 
 DECL_FUNCTION(void, GX2CopyColorBufferToScanBuffer, const GX2ColorBuffer *colorBuffer, GX2ScanTarget scanTarget) {
-    {
-        std::unique_lock<std::mutex> lock(sShotLock);
-        if (sShotTarget != 0 && (sShotTarget & scanTarget) && colorBuffer) {
-            sShotError.clear();
-            capture((GX2ScanTarget) (sShotTarget & scanTarget));
-            sShotTarget = 0;
-            sShotReady  = true;
-            sShotDone.notify_all();
+    std::unique_lock<std::mutex> lock(sShotLock);
+    const ScanBuffers *sb = nullptr;
+    if (sShotTarget != 0 && (sShotTarget & scanTarget) && colorBuffer) {
+        sb = (scanTarget & GX2_SCAN_TARGET_TV) ? &sScanTV : &sScanDRC;
+        if (sb->base) {
+            markSlots(*sb);
         }
     }
     real_GX2CopyColorBufferToScanBuffer(colorBuffer, scanTarget);
+    if (!sb) {
+        return;
+    }
+    sShotError.clear();
+    if (!sb->base) {
+        sShotError = "the application set its scan buffers before the plugin loaded";
+    } else {
+        GX2DrawDone(); // the application's own copy, finished
+        int slot = writtenSlot(*sb);
+        if (slot < 0) {
+            sShotError = "could not tell which scan buffer the frame went to";
+        } else {
+            readSlot(*sb, (uint32_t) slot);
+        }
+    }
+    sShotTarget = 0;
+    sShotReady  = true;
+    sShotDone.notify_all();
 }
 
 WUPS_MUST_REPLACE(GX2CopyColorBufferToScanBuffer, WUPS_LOADER_LIBRARY_GX2, GX2CopyColorBufferToScanBuffer);
