@@ -299,6 +299,12 @@ impl Game {
     }
 }
 
+/// Milliseconds since `t`, as an integer. On this target `Duration`'s derived ordering (`>=` on two `Duration`s)
+/// gave wrong answers with CR-bit instructions disabled, like the slice `Ord` in horizon-world; integers compare right.
+fn ms_since(t: std::time::Instant) -> u64 {
+    t.elapsed().as_millis() as u64
+}
+
 /// A scripted player for runs without a controller.
 fn demo_input(frame: u32, straight: bool) -> (Input, bool, bool) {
     let mut input = Input { forward: 0.8, look_x: 0.0, ..Default::default() };
@@ -424,9 +430,9 @@ fn main() {
         }
         // one position packet per 100 ms (two server ticks), starting a second after PlayerLoaded: a server still
         // generating its first chunks stalls its tick, and moves queued into one tick are a kick
-        let moving = loaded_at.is_some_and(|t| t.elapsed() >= std::time::Duration::from_millis(1000)) && net::chunks_quiet(2000);
+        let moving = loaded_at.is_some_and(|t| ms_since(t) >= 1000) && net::chunks_quiet(2000);
         // plain ifs: a tuple pattern `(Some(n), true)` here never matched on this target, though both were true
-        let due = last_move.elapsed() >= std::time::Duration::from_millis(100);
+        let due = ms_since(last_move) >= 100;
         if game.spawned && moving && due {
             if let Some(n) = net.as_ref() {
                 last_move = std::time::Instant::now();
