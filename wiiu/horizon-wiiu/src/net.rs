@@ -63,6 +63,9 @@ impl Net {
         }
         let body = play::Serverbound::MovePlayerPos(play::MovePlayerPos { x: pos[0], y: pos[1], z: pos[2], flags: on_ground as u8 }).encode();
         let _ = self.shared.send(&body);
+        // a vanilla client ends every tick with ClientTickEnd; the server clears its one-move-per-tick flag on it,
+        // so a second move without one in between is "Invalid move player packet"
+        let _ = self.shared.send(&play::Serverbound::ClientTickEnd(Empty).encode());
     }
 }
 
