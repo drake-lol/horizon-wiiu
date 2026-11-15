@@ -7,7 +7,7 @@ use core::ffi::c_void;
 use core::mem::{size_of, zeroed};
 use wut_sys::*;
 
-static SHADER: &[u8] = include_bytes!("../assets/color_mvp.gsh");
+static SHADER: &[u8] = include_bytes!("../assets/tex_mvp.gsh");
 
 const VERTEX_BUFFER_FLAGS: u32 = GX2RResourceFlags_GX2R_RESOURCE_BIND_VERTEX_BUFFER
     | GX2RResourceFlags_GX2R_RESOURCE_USAGE_CPU_READ
@@ -16,6 +16,12 @@ const VERTEX_BUFFER_FLAGS: u32 = GX2RResourceFlags_GX2R_RESOURCE_BIND_VERTEX_BUF
 
 pub struct Gfx {
     group: Box<WHBGfxShaderGroup>,
+    texture: Option<Box<GX2Texture>>,
+    sampler: GX2Sampler,
+}
+
+unsafe extern "C" {
+    fn memalign(align: usize, size: usize) -> *mut c_void;
 }
 
 pub struct Mesh {
@@ -36,8 +42,48 @@ impl Gfx {
             }
             WHBGfxInitShaderAttribute(&mut *group, c"aPosition".as_ptr(), 0, 0, GX2AttribFormat_GX2_ATTRIB_FORMAT_FLOAT_32_32_32_32);
             WHBGfxInitShaderAttribute(&mut *group, c"aColor".as_ptr(), 0, 16, GX2AttribFormat_GX2_ATTRIB_FORMAT_UNORM_8_8_8_8);
+            WHBGfxInitShaderAttribute(&mut *group, c"aTexCoord".as_ptr(), 0, 20, GX2AttribFormat_GX2_ATTRIB_FORMAT_FLOAT_32_32);
             WHBGfxInitFetchShader(&mut *group);
-            Some(Gfx { group })
+
+            let mut sampler: GX2Sampler = zeroed();
+            GX2InitSampler(&mut sampler, GX2TexClampMode_GX2_TEX_CLAMP_MODE_CLAMP, GX2TexXYFilterMode_GX2_TEX_XY_FILTER_MODE_POINT);
+            Some(Gfx { group, texture: None, sampler })
+        }
+    }
+
+    /// Create the block texture from RGBA bytes (`width * height * 4`).
+    pub fn set_texture(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        unsafe {
+            let mut tex: Box<GX2Texture> = Box::new(zeroed());
+            tex.surface.dim = GX2SurfaceDim_GX2_SURFACE_DIM_TEXTURE_2D;
+            tex.surface.width = width;
+            tex.surface.height = height;
+            tex.surface.depth = 1;
+            tex.surface.mipLevels = 1;
+            tex.surface.format = GX2SurfaceFormat_GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8;
+            tex.surface.aa = GX2AAMode_GX2_AA_MODE1X;
+            tex.surface.__bindgen_anon_1.use_ = GX2SurfaceUse_GX2_SURFACE_USE_TEXTURE;
+            tex.surface.tileMode = GX2TileMode_GX2_TILE_MODE_LINEAR_ALIGNED;
+            tex.viewNumMips = 1;
+            tex.viewNumSlices = 1;
+            // component map R, G, B, A = selects 0, 1, 2, 3
+            tex.compMap = 0x0001_0203;
+            GX2CalcSurfaceSizeAndAlignment(&mut tex.surface);
+            GX2InitTextureRegs(&mut *tex);
+            let image = memalign(tex.surface.alignment as usize, tex.surface.imageSize as usize) as *mut u8;
+            if image.is_null() {
+                return false;
+            }
+            core::ptr::write_bytes(image, 0, tex.surface.imageSize as usize);
+            let pitch = tex.surface.pitch as usize;
+            for y in 0..height as usize {
+                let src = &rgba[y * width as usize * 4..(y + 1) * width as usize * 4];
+                core::ptr::copy_nonoverlapping(src.as_ptr(), image.add(y * pitch * 4), src.len());
+            }
+            tex.surface.image = image as *mut c_void;
+            GX2Invalidate(GX2InvalidateMode_GX2_INVALIDATE_MODE_CPU_TEXTURE, image as *mut c_void, tex.surface.imageSize);
+            self.texture = Some(tex);
+            true
         }
     }
 
@@ -100,6 +146,10 @@ impl Gfx {
             GX2SetVertexShader((*group).vertexShader);
             GX2SetPixelShader((*group).pixelShader);
             GX2SetVertexUniformReg(0, 16, mvp.as_ptr() as *const c_void);
+            if let Some(tex) = &self.texture {
+                GX2SetPixelTexture(&**tex, 0);
+                GX2SetPixelSampler(&self.sampler, 0);
+            }
 
             for mesh in meshes.iter_mut() {
                 GX2RSetAttributeBuffer(&mut mesh.buffer, 0, size_of::<Vertex>() as u32, 0);

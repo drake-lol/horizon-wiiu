@@ -2,6 +2,7 @@
 //! looks, ZL/ZR down/up); with no input the camera flies a circuit by itself.
 extern crate wiiu_atomics;
 
+mod atlas;
 mod gfx;
 mod math;
 mod world;
@@ -24,10 +25,12 @@ fn main() {
         WHBProcInit();
         VPADInit();
     }
-    let Some(gfx) = gfx::Gfx::new() else {
+    let Some(mut gfx) = gfx::Gfx::new() else {
         println!("horizon-wiiu: GX2 init failed");
         return;
     };
+    let ok = gfx.set_texture(atlas::SIZE as u32, atlas::SIZE as u32, &atlas::build());
+    println!("horizon-wiiu: atlas texture -> {ok}");
 
     let world = world::World::generate();
     let mut meshes = Vec::new();

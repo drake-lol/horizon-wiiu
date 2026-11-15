@@ -1,6 +1,8 @@
 //! A small voxel world and its mesher. The terrain here is procedural; a loader for Minecraft region
 //! files replaces `generate` once the engine crates are linked in.
 
+use crate::atlas;
+
 pub const SIZE_X: usize = 128;
 pub const SIZE_Z: usize = 128;
 pub const SIZE_Y: usize = 64;
@@ -26,17 +28,21 @@ impl Block {
         !matches!(self, Block::Air | Block::Water)
     }
 
-    fn rgb(self) -> [u8; 3] {
+    /// The atlas tile for a face: `up` is +Y, `down` is -Y, anything else a side.
+    fn tile(self, up: bool, down: bool) -> usize {
         match self {
-            Block::Air => [0, 0, 0],
-            Block::Stone => [125, 125, 125],
-            Block::Dirt => [134, 96, 67],
-            Block::Grass => [95, 159, 53],
-            Block::Sand => [219, 207, 163],
-            Block::Water => [46, 92, 200],
-            Block::Snow => [245, 250, 250],
-            Block::Log => [102, 81, 49],
-            Block::Leaves => [56, 118, 29],
+            Block::Air | Block::Stone => atlas::STONE,
+            Block::Dirt => atlas::DIRT,
+            Block::Grass => {
+                if up { atlas::GRASS_TOP } else if down { atlas::DIRT } else { atlas::GRASS_SIDE }
+            }
+            Block::Sand => atlas::SAND,
+            Block::Water => atlas::WATER,
+            Block::Snow => atlas::SNOW,
+            Block::Log => {
+                if up || down { atlas::LOG_TOP } else { atlas::LOG_SIDE }
+            }
+            Block::Leaves => atlas::LEAVES,
         }
     }
 }
@@ -46,6 +52,7 @@ impl Block {
 pub struct Vertex {
     pub pos: [f32; 4],
     pub color: [u8; 4],
+    pub uv: [f32; 2],
 }
 
 pub struct World {
@@ -172,7 +179,6 @@ impl World {
                     if b == Block::Air {
                         continue;
                     }
-                    let base = b.rgb();
                     let tint = 0.94 + 0.12 * hash(x * 31 + y, z, 5);
                     for (n, o, u, v, shade) in FACES.iter() {
                         let nb = self.get(x + n[0], y + n[1], z + n[2]);
@@ -180,12 +186,19 @@ impl World {
                         if !visible {
                             continue;
                         }
-                        let k = shade * tint;
-                        let color = [(base[0] as f32 * k) as u8, (base[1] as f32 * k) as u8, (base[2] as f32 * k) as u8, 255];
+                        let k = (shade * tint * 255.0).min(255.0) as u8;
+                        let color = [k, k, k, 255];
+                        let (u0, v0, size) = atlas::uv_rect(b.tile(n[1] == 1, n[1] == -1));
+                        // which of the quad's two axes runs up the face
+                        let u_vertical = u[1] != 0.0 && v[1] == 0.0;
                         let p = [x as f32 + o[0], y as f32 + o[1], z as f32 + o[2]];
-                        let corner = |a: f32, c: f32| Vertex {
-                            pos: [p[0] + u[0] * a + v[0] * c, p[1] + u[1] * a + v[1] * c, p[2] + u[2] * a + v[2] * c, 1.0],
-                            color,
+                        let corner = |a: f32, c: f32| {
+                            let (h, vert) = if u_vertical { (c, 1.0 - a) } else { (a, 1.0 - c) };
+                            Vertex {
+                                pos: [p[0] + u[0] * a + v[0] * c, p[1] + u[1] * a + v[1] * c, p[2] + u[2] * a + v[2] * c, 1.0],
+                                color,
+                                uv: [u0 + h * size, v0 + vert * size],
+                            }
                         };
                         out.push(corner(0.0, 0.0));
                         out.push(corner(1.0, 0.0));

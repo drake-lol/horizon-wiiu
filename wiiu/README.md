@@ -1,7 +1,7 @@
 # Horizon for Wii U (work in progress)
 
 Experimental port. Status: the real `horizon-server` binary boots in Cemu and prints its CLI usage (`std`: heap, `println!`, threads work);
-Rust drives the GPU through GX2 (`gxtest/`: a vertex-coloured triangle renders in Cemu).
+Rust drives the GPU through GX2: `horizon-wiiu/` renders a textured voxel world (73k quads, depth, culling, GamePad input) in Cemu.
 
 ## Layout
 - `powerpc-nintendo-wiiu.json`: custom target (32-bit big-endian PowerPC 750, newlib, `os = "vita"` so
@@ -14,6 +14,8 @@ Rust drives the GPU through GX2 (`gxtest/`: a vertex-coloured triangle renders i
   to devkitPPC's (mutex is 12 bytes, zero-initialised).
 - `wut-sys/`: bindgen bindings to wut (coreinit, GX2, GX2R, WHB, VPAD, KPAD, ProcUI); regenerate with `wut-sys/gen.sh` in the toolchain image.
 - `gxtest/`: GX2 triangle using `pos_col_shader.gsh` from devkitPro/wiiu-examples (ISC/zlib-style licence).
+- `horizon-wiiu/`: the Wii U client front end (GX2 renderer, voxel mesher, procedural atlas, VPAD flight camera).
+- `shaders/`: hand-written Latte (R700) assembly for the game's shaders (`tex_mvp.vsh/.psh`: MVP, vertex colour, one texture). Assemble with `tools/asm.sh` after `tools/build_latte_assembler.sh`; the resulting `.gsh` is committed under `horizon-wiiu/assets/`.
 - `hello/` (`no_std` + wut), `stdhello/` (std + threads), `stdtest/`: test programs.
 - `tools/`: Dockerfiles for the toolchain and for Cemu, and the headless Cemu runner.
 
@@ -36,8 +38,9 @@ Program output appears as `[OSConsole]` lines in `out/home/.local/share/Cemu/log
 Cemu lacks `nsysnet.set_multicast_state`, so test builds use the `skip-socket-init` feature of `wiiu-atomics`.
 
 ## Known gaps
-- Shaders: there is no GLSL/WGSL to GX2 (Latte) compiler on Linux. Precompiled `.gsh` files work; the game's shaders
-  need a build-time path (hand-written Latte assembly, or porting an assembler such as latte-assembler).
+- Shaders: no GLSL/WGSL to Latte compiler exists on Linux (decaf's `latte-assembler compile` needs AMD's Windows
+  analyzer). Game shaders are therefore written directly in Latte assembly and assembled with decaf's `latte-assembler`
+  (built by `tools/build_latte_assembler.sh`; it reproduces wiiu-examples' `shader.gsh` byte for byte).
 - The client (`horizon-client*`) pulls in winit, wgpu, arboard, fs4 (rustix) and others that need a Wii U
   window/input/GX2 layer; this is the main remaining work.
 - Thread-exit destructors for pthread keys are not run; no real TLS (`has-thread-local` is false).
