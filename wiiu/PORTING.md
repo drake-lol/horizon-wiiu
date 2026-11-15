@@ -45,3 +45,14 @@ straight from Mojang for that account. Nothing of Mojang's is shipped or redistr
   option-struct sizes: the libc crate's timeval/linger/socket constants are not the console's). A hosts-file resolver
   (`/vol/external01/horizon/hosts.txt`) exists in `wiiu/nettest`. Real-hardware behaviour is unknown; the socket layer
   should be written against wut's own nsysnet headers, not libc's, and tested on a console.
+
+## Status: joined a real Horizon server from the Wii U (Cemu)
+`wiiu/horizon-wiiu` now joins a real `horizon-server` (offline mode, localhost) over the real 26.3 protocol:
+handshake, login, configuration (67 biomes, 24 sections), PlayerLoaded, teleport, chunk batches, keepalives.
+Chunk sections are decoded with `horizon-protocol`, block state ids mapped through `states.bin` (35,723 states ->
+35,731 bytes, made by `wiiu/mkstates` from the player's own `facts.json`), and drawn with the GX2 renderer.
+Lessons from the server's own rules (crates/horizon-client/src/lan/hub.rs): one position packet per tick, none
+before PlayerLoaded, each teleport answered once; the server stalls its tick while generating the first chunks,
+so the client waits for the chunk stream to settle and then sends 10 positions a second.
+Not the real client: the front end (renderer, input, physics, HUD) is Wii U code written here; the game logic is the
+real server's. Block editing is not sent to the server yet; textures are still placeholders.
