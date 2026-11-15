@@ -47,6 +47,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <memory/mappedmemory.h>
 #include <string>
 #include <thread>
 #include <vector>
@@ -229,7 +230,7 @@ static void capture(const GX2ColorBuffer *cb) {
         tmp.use       = GX2_SURFACE_USE_TEXTURE_COLOR_BUFFER_TV;
         tmp.tileMode  = GX2_TILE_MODE_DEFAULT;
         GX2CalcSurfaceSizeAndAlignment(&tmp);
-        resolved = MEMAllocFromDefaultHeapEx(tmp.imageSize, tmp.alignment);
+        resolved = MEMAllocFromMappedMemoryForGX2Ex(tmp.imageSize, tmp.alignment);
         if (!resolved) {
             sShotError = "out of memory resolving AA";
             return;
@@ -246,19 +247,21 @@ static void capture(const GX2ColorBuffer *cb) {
     lin.mipLevels = 1;
     lin.format    = src->format;
     lin.aa        = GX2_AA_MODE1X;
-    lin.use       = GX2_SURFACE_USE_TEXTURE;
+    lin.use       = (GX2SurfaceUse) (GX2_SURFACE_USE_COLOR_BUFFER | GX2_SURFACE_USE_TEXTURE);
     lin.tileMode  = GX2_TILE_MODE_LINEAR_ALIGNED;
     GX2CalcSurfaceSizeAndAlignment(&lin);
-    void *image = MEMAllocFromDefaultHeapEx(lin.imageSize, lin.alignment);
+    void *image = MEMAllocFromMappedMemoryForGX2Ex(lin.imageSize, lin.alignment);
     if (!image) {
         if (resolved) {
-            MEMFreeToDefaultHeap(resolved);
+            MEMFreeToMappedMemory(resolved);
         }
         sShotError = "out of memory copying the frame";
         return;
     }
     lin.image = image;
+    GX2Invalidate(GX2_INVALIDATE_MODE_CPU, image, lin.imageSize);
     GX2CopySurface(src, src == &tmp ? 0 : cb->viewMip, src == &tmp ? 0 : cb->viewFirstSlice, &lin, 0, 0);
+    GX2Invalidate(GX2_INVALIDATE_MODE_COLOR_BUFFER, image, lin.imageSize);
     GX2DrawDone();
     DCInvalidateRange(image, lin.imageSize);
 
@@ -294,9 +297,9 @@ static void capture(const GX2ColorBuffer *cb) {
         snprintf(msg, sizeof msg, "format %#x read as RGBA8", (unsigned) lin.format);
         sShotError = msg; // a warning: the picture is still sent
     }
-    MEMFreeToDefaultHeap(image);
+    MEMFreeToMappedMemory(image);
     if (resolved) {
-        MEMFreeToDefaultHeap(resolved);
+        MEMFreeToMappedMemory(resolved);
     }
 }
 
