@@ -119,6 +119,27 @@ pub trait Clipboard {
     fn set(&mut self, text: &str);
 }
 
+/// No system clipboard on the Wii U: a stand-in that never connects, so [`SystemClipboard`] keeps the
+/// text the game copied.
+#[cfg(target_vendor = "wiiu")]
+mod arboard {
+    pub enum Error {
+        ContentNotAvailable,
+    }
+    pub struct Clipboard;
+    impl Clipboard {
+        pub fn new() -> Result<Self, Error> {
+            Err(Error::ContentNotAvailable)
+        }
+        pub fn get_text(&mut self) -> Result<String, Error> {
+            Err(Error::ContentNotAvailable)
+        }
+        pub fn set_text(&mut self, _text: String) -> Result<(), Error> {
+            Err(Error::ContentNotAvailable)
+        }
+    }
+}
+
 /// The system clipboard (`ClipboardManager`). On Wayland, arboard uses the
 /// data-control protocol and falls back to X11 (XWayland) on compositors
 /// without it. When no system clipboard can be reached, text copied in the

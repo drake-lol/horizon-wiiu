@@ -87,11 +87,11 @@ pub fn set_metadata(device: &wgpu::Device, surface: &wgpu::Surface<'_>, peak: f3
         // Safety: a live swapchain of this device, one metadata entry for it.
         unsafe { loader.set_hdr_metadata(&[swapchain], &[metadata(peak, black)]) };
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_vendor = "wiiu"))]
     let _ = (device, surface, peak, black);
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_vendor = "wiiu")))]
 fn metadata(peak: f32, black: f32) -> ash::vk::HdrMetadataEXT<'static> {
     let xy = |x, y| ash::vk::XYColorEXT { x, y };
     ash::vk::HdrMetadataEXT::default()
