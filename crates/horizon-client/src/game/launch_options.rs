@@ -176,12 +176,13 @@ impl Options {
     /// The command line alone: no file is read and nothing changes. `None` for `--help` and
     /// `--launch-api`, which print and end the run.
     pub(super) fn parse(mut args: impl Iterator<Item = String>) -> Result<Option<Self>> {
-        let sibling = std::env::current_exe()?
-            .parent()
-            .ok_or("missing executable directory")?
-            .join("resources");
+        // Resources beside the executable, where there is one to ask (the Wii U has no `current_exe`).
+        let sibling = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("resources")))
+            .filter(|dir| dir.join("horizon-resources.json").exists());
         let mut o = Self {
-            resources: if sibling.join("horizon-resources.json").exists() {
+            resources: if let Some(sibling) = sibling {
                 sibling
             } else {
                 std::path::Path::new(".local/horizon-client").join(horizon_core::VANILLA_VERSION)
