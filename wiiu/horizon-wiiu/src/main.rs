@@ -433,7 +433,13 @@ fn main() {
         let moving = loaded_at.is_some_and(|t| ms_since(t) >= 1000) && net::chunks_quiet(2000);
         // plain ifs: a tuple pattern `(Some(n), true)` here never matched on this target, though both were true
         let due = ms_since(last_move) >= 100;
+        if game.frame % 120 == 60 {
+            println!("gate: spawned={} moving={} due={} net={}", game.spawned, moving, due, net.is_some());
+        }
         if game.spawned && moving && due {
+            if game.frame % 120 == 60 {
+                println!("gate: inside");
+            }
             if let Some(n) = net.as_ref() {
                 last_move = std::time::Instant::now();
                 n.move_to(game.player_server_pos(), game.player.on_ground);
