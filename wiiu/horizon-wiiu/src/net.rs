@@ -212,6 +212,8 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
     let mut dimension = dynamic.dimension(0);
     let mut batch_started = std::time::Instant::now();
     let mut chunks = 0u32;
+    // The server resends a teleport it has not seen answered; answering the same id twice is a kick.
+    let mut accepted: Option<i32> = None;
     let block_bits = ceil_log2(states.len().max(2));
     let close = |tx: &Sender<Event>, why: String| {
         let _ = tx.send(Event::Closed(why));
@@ -248,6 +250,11 @@ fn play(mut framer: Framer, shared: Arc<Shared>, dynamic: Dynamic, biome_bits: u
             }
             cb::PLAYER_POSITION => match play::Clientbound::decode(id, &body) {
                 Ok(play::Clientbound::PlayerPosition(p)) => {
+                    println!("net: teleport #{} (already answered: {})", p.teleport, accepted == Some(p.teleport));
+                    if accepted == Some(p.teleport) {
+                        continue;
+                    }
+                    accepted = Some(p.teleport);
                     let _ = tx.send(Event::Spawn(p.position));
                     shared.send(
                         &play::Serverbound::AcceptTeleportation(play::AcceptTeleportation {
