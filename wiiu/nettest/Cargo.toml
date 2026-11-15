@@ -1,0 +1,14 @@
+[package]
+name = "wiiu-nettest"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+wiiu-atomics = { path = "../atomics", features = ["skip-socket-init", "console-stdout", "trace-fatal"] }
+ureq = { version = "2", default-features = false, features = ["tls"] }
+
+[profile.release]
+opt-level = "s"
+panic = "abort"
