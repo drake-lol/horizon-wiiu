@@ -113,6 +113,9 @@ fn run(name: &str, f: impl Fn(u64, u64) -> u64, vals: &[u64]) {
             let r = f(bb(a), bb(b));
             h.add(r);
             row.add(r);
+            if rows && i == 0 && name == "u64 sat" {
+                println!("raw {b:x} -> {r:x}");
+            }
         }
         if rows {
             println!("row {name} {i} {a:x} {:016x}", row.0);
