@@ -229,6 +229,16 @@ fn run(name: &str, f: impl Fn(u64, u64) -> u64, vals: &[u64]) {
 }
 
 #[inline(never)]
+#[no_mangle]
+pub extern "C" fn add3_u64(x: u32, y: u32, c: u32) -> u64 {
+    x as u64 + y as u64 + c as u64
+}
+#[inline(never)]
+#[no_mangle]
+pub extern "C" fn sat_mix(a: u64, b: u64) -> u64 {
+    a.saturating_sub(b) ^ a.saturating_add(b)
+}
+#[inline(never)]
 fn cmp_u32(x: u32, y: u32) -> i8 {
     x.cmp(&y) as i8
 }
@@ -307,6 +317,12 @@ fn combos() {
 }
 
 fn micro() {
+    for (x, y, c) in [(1u32, 0xFFFF_FFFFu32, 1u32), (2, 0xFFFF_FFFE, 1), (0, 0, 0), (0xFFFF_FFFF, 0xFFFF_FFFF, 1), (5, 6, 0)] {
+        println!("add3 {x:x} {y:x} {c}: {:x}", add3_u64(bb(x), bb(y), bb(c)));
+    }
+    for (a, b) in [(0u64, 0x1_0000_0000u64), (0, 0x7016_343D_3C81_661C), (0, 0xC176_815D), (5, 3), (u64::MAX, 2)] {
+        println!("satmix {a:x} {b:x}: {:x}", sat_mix(bb(a), bb(b)));
+    }
     let pairs: [(u64, u64); 10] = [
         (0, 0), (1, 2), (2, 1), (0x8000_0000, 1), (1, 0x8000_0000), (0xFFFF_FFFF, 0), (5, 5),
         (0x1_0000_0001, 0x1_0000_0000), (0x0000_0001_0000_0000, 0x0000_0000_FFFF_FFFF), (u64::MAX, 1),
