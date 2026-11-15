@@ -6,7 +6,7 @@
   "dynamic-linking": false,
   "env": "newlib",
   "executables": true,
-  "features": "+msync,-altivec,-vsx",
+  "features": "+msync,-altivec,-vsx,-crbits",
   "has-thread-local": false,
   "linker": "powerpc-eabi-gcc",
   "linker-flavor": "gcc",
