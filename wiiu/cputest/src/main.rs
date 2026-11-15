@@ -1,7 +1,75 @@
 //! Prints one hash per kind of computation. Run natively and on the Wii U (Cemu) and diff the output:
 //! a differing line names the operations to look at.
+#![cfg_attr(target_vendor = "wiiu", feature(asm_experimental_arch))]
 #[cfg(target_vendor = "wiiu")]
 extern crate wiiu_atomics;
+
+/// Condition-register instructions LLVM uses to keep comparison results across calls.
+#[cfg(target_vendor = "wiiu")]
+fn cr_tests() {
+    use core::arch::asm;
+    for &start in &[0x0000_0000u32, 0xFFFF_FFFF, 0x1234_5678, 0x8421_8421] {
+        for &val in &[0x0000_0000u32, 0xFFFF_FFFF, 0xA5A5_A5A5, 0x0F0F_F0F0] {
+            // mtcrf 0xFF then mtcrf on one field (2, mask 0x20) then mfcr
+            let (all, f2, f3, f4, f24): (u32, u32, u32, u32, u32);
+            unsafe {
+                asm!("mtcrf 255, {s}", "mfcr {o}", s = in(reg) start, o = out(reg) all);
+                asm!("mtcrf 255, {s}", "mtcrf 32, {v}", "mfcr {o}", s = in(reg) start, v = in(reg) val, o = out(reg) f2);
+                asm!("mtcrf 255, {s}", "mtcrf 16, {v}", "mfcr {o}", s = in(reg) start, v = in(reg) val, o = out(reg) f3);
+                asm!("mtcrf 255, {s}", "mtcrf 8, {v}", "mfcr {o}", s = in(reg) start, v = in(reg) val, o = out(reg) f4);
+                asm!("mtcrf 255, {s}", "mtcrf 56, {v}", "mfcr {o}", s = in(reg) start, v = in(reg) val, o = out(reg) f24);
+            }
+            let field = |m: u32| (start & !m) | (val & m);
+            let want = [start, field(0x00F0_0000), field(0x000F_0000), field(0x0000_F000), field(0x00FF_F000)];
+            let got = [all, f2, f3, f4, f24];
+            for k in 0..5 {
+                if got[k] != want[k] {
+                    println!("CR BAD mtcrf case {k} start {start:#010x} val {val:#010x}: got {:#010x} want {:#010x}", got[k], want[k]);
+                }
+            }
+            // mcrf: copy field 0 into field 2, field 5 into field 3
+            let (m1, m2): (u32, u32);
+            unsafe {
+                asm!("mtcrf 255, {s}", "mcrf 2, 0", "mfcr {o}", s = in(reg) start, o = out(reg) m1);
+                asm!("mtcrf 255, {s}", "mcrf 3, 5", "mfcr {o}", s = in(reg) start, o = out(reg) m2);
+            }
+            let cf = |x: u32, f: u32| (x >> (28 - 4 * f)) & 0xF;
+            let set = |x: u32, f: u32, v: u32| (x & !(0xF << (28 - 4 * f))) | (v << (28 - 4 * f));
+            let w1 = set(start, 2, cf(start, 0));
+            let w2 = set(start, 3, cf(start, 5));
+            if m1 != w1 || m2 != w2 {
+                println!("CR BAD mcrf start {start:#010x}: got {m1:#010x} {m2:#010x} want {w1:#010x} {w2:#010x}");
+            }
+        }
+    }
+    // a comparison into cr2, kept across a call, then branched on
+    #[inline(never)]
+    extern "C" fn clobber() -> u32 {
+        bb(7)
+    }
+    let mut bad = 0;
+    for (a, b) in [(1u32, 2u32), (2, 1), (3, 3)] {
+        let r: u32;
+        unsafe {
+            asm!(
+                "cmplw 2, {a}, {b}",
+                "mfcr {t}",
+                "mtcrf 32, {t}",
+                "li {r}, 0",
+                "blt 2, 1f",
+                "li {r}, 1",
+                "1:",
+                a = in(reg) a, b = in(reg) b, t = out(reg) _, r = out(reg) r,
+            );
+        }
+        let _ = clobber();
+        if (r == 0) != (a < b) {
+            bad += 1;
+            println!("CR BAD cmplw cr2 {a} {b} -> {r}");
+        }
+    }
+    println!("cr tests done ({bad} bad branch cases)");
+}
 
 use std::hint::black_box as bb;
 
@@ -155,6 +223,8 @@ fn main() {
     unsafe {
         wut_sys::WHBProcInit();
     }
+    #[cfg(target_vendor = "wiiu")]
+    cr_tests();
     micro();
     combos();
     let mut r = Rng(0x1234_5678_9ABC_DEF1);
