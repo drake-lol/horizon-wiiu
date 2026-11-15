@@ -38,6 +38,7 @@ fn main() {
     let mut meshes = Vec::new();
     let mut quads = 0u32;
     for cz in 0..world.sz / world::CHUNK {
+        println!("horizon-wiiu: meshing chunk row {cz}");
         for cx in 0..world.sx / world::CHUNK {
             let verts = world.mesh_chunk(cx, cz);
             quads += verts.len() as u32 / 4;
