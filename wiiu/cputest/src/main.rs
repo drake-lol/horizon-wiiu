@@ -106,9 +106,16 @@ fn values(r: &mut Rng) -> Vec<u64> {
 
 fn run(name: &str, f: impl Fn(u64, u64) -> u64, vals: &[u64]) {
     let mut h = H(0xcbf2_9ce4_8422_2325);
-    for &a in vals {
+    let rows = name == "u32 cmp" || name == "u64 sat";
+    for (i, &a) in vals.iter().enumerate() {
+        let mut row = H(1);
         for &b in vals.iter().step_by(7) {
-            h.add(f(bb(a), bb(b)));
+            let r = f(bb(a), bb(b));
+            h.add(r);
+            row.add(r);
+        }
+        if rows {
+            println!("row {name} {i} {a:x} {:016x}", row.0);
         }
     }
     println!("{name:24} {:016x}", h.0);
