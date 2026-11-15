@@ -1,0 +1,15 @@
+[package]
+name = "rendercheck"
+version = "0.1.0"
+edition = "2021"
+description = "Builds the real renderer (horizon-client-render) for the Wii U target, to find what still needs porting"
+
+[workspace]
+
+[dependencies]
+horizon-client-render = { path = "../../crates/horizon-client-render", default-features = false }
+
+[patch.crates-io]
+wgpu-hal = { path = "../../third_party/wgpu-hal" }
+naga = { path = "../../third_party/naga" }
+libmimalloc-sys = { path = "../../third_party/libmimalloc-sys" }

@@ -16,11 +16,10 @@ fn auto_options(m: &naga::Module) -> Options {
         match (g.space, &m.types[g.ty].inner) {
             (AddressSpace::Uniform, _) => {
                 o.uniform_blocks.insert(b, ub);
-                o.uniform_fetch.insert(b, 128 + ub);
                 ub += 1;
             }
             (AddressSpace::Storage { .. }, _) => {
-                o.storage_buffers.insert(b, 144 + buf);
+                o.storage_buffers.insert(b, 8 + buf);
                 buf += 1;
             }
             (_, TypeInner::Image { .. }) => {

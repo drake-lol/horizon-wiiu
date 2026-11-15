@@ -205,7 +205,8 @@ fn texture_sample_and_storage_fetch() {
         // a texture whose colour is (u * 2, v * 4)
         [(f32::from_bits(c[0]) * 2.0).to_bits(), (f32::from_bits(c[1]) * 4.0).to_bits(), 0, 0]
     });
-    m.buffers.insert(7, vec![1, 2, 3, 4, 5, 6]);
+    // fetch buffer 128 + location 7; array<vec2<u32>> has an 8-byte stride, so element 2 is bytes 16..24
+    m.buffers.insert(135, vec![1, 2, 3, 4, 5, 6]);
     m.set(0, [0.25, 0.5, 0.0, 0.0]);
     m.regs[1][0] = 2;
     let out = m.run(&s.code);

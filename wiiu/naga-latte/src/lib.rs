@@ -40,11 +40,12 @@ impl std::error::Error for Error {}
 /// Which hardware slot each resource binding uses.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// Uniform buffers: the uniform block (kcache bank) each is bound to.
+    /// Uniform buffers: the uniform block location each is bound to (GX2Set*UniformBlock). Constant indices
+    /// read through the kcache; dynamic ones fetch from buffer 128 + location, which GX2 binds with the block.
+    /// The data is in the GPU's byte order (32-bit words swapped).
     pub uniform_blocks: HashMap<naga::ResourceBinding, u8>,
-    /// Uniform buffers also bound as fetch buffers, for dynamic indexing (data in the GPU's byte order).
-    pub uniform_fetch: HashMap<naga::ResourceBinding, u8>,
-    /// Read-only storage buffers: fetch buffer ids (data in the CPU's byte order, swapped on read).
+    /// Read-only storage buffers, also bound as uniform blocks: their locations. The data stays in the CPU's
+    /// byte order and is swapped as it is fetched.
     pub storage_buffers: HashMap<naga::ResourceBinding, u8>,
     pub textures: HashMap<naga::ResourceBinding, u8>,
     pub samplers: HashMap<naga::ResourceBinding, u8>,

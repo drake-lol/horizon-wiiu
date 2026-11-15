@@ -436,7 +436,8 @@ impl<'a> Machine<'a> {
             47 => 3,
             _ => 4,
         };
-        let base = self.regs[src][src_x] as usize + (offset / 4) as usize;
+        // buffers are bound with a 16-byte stride (GX2 uniform blocks)
+        let base = self.regs[src][src_x] as usize * 4 + (offset / 4) as usize;
         let data = &self.buffers[&buffer];
         let mut r = [0u32; 4];
         for (k, item) in r.iter_mut().enumerate().take(count) {

@@ -35,7 +35,9 @@ enum Lv {
 enum Root {
     Local(usize, Handle<LocalVariable>),
     Private(Handle<GlobalVariable>),
-    Uniform { block: u8, fetch: Option<u8> },
+    /// A uniform block location: kcache bank, and fetch buffer 128 + location.
+    Uniform(u8),
+    /// A storage buffer, bound as a uniform block at this location (data left in the CPU's byte order).
     Storage(u8),
 }
 
@@ -43,8 +45,8 @@ enum Root {
 enum Dyn {
     /// Element `idx` of `count`, each `stride` scalars, inside a register variable.
     Scalars { idx: V, stride: u32, count: u32 },
-    /// A dword index into a buffer.
-    Dwords(V),
+    /// A byte offset into a buffer; `aligned16` when every dynamic step was a multiple of 16 bytes.
+    Bytes { v: V, aligned16: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -58,7 +60,7 @@ struct Ptr {
 
 impl Ptr {
     fn in_buffer(&self) -> bool {
-        matches!(self.root, Root::Uniform { .. } | Root::Storage(_))
+        matches!(self.root, Root::Uniform(_) | Root::Storage(_))
     }
 }
 
@@ -685,34 +687,58 @@ impl<'a> Lower<'a> {
                     }
                 }
             }
-            Some(Dyn::Dwords(_)) => unreachable!(),
+            Some(Dyn::Bytes { .. }) => unreachable!(),
         }
         Ok(())
     }
 
     fn read(&mut self, p: &Ptr) -> R<Vec<Arg>> {
         match p.root {
-            Root::Uniform { block, fetch } => {
+            Root::Uniform(block) if p.dynamic.is_none() => {
                 let offs = self.byte_offsets(&p.ty)?;
-                match (&p.dynamic, fetch) {
-                    (None, _) => Ok(offs
-                        .iter()
-                        .map(|o| {
-                            let b = p.off + o;
-                            Arg { a: A::Ub { block, index: (b / 16) as u16, chan: ((b % 16) / 4) as u8 }, neg: false, abs: false }
-                        })
-                        .collect()),
-                    (Some(Dyn::Dwords(idx)), Some(buffer)) => self.fetch(buffer, *idx, p.off, &offs, false),
-                    _ => unsupported("dynamic indexing into a uniform block without a fetch buffer"),
-                }
+                Ok(offs
+                    .iter()
+                    .map(|o| {
+                        let b = p.off + o;
+                        Arg { a: A::Ub { block, index: (b / 16) as u16, chan: ((b % 16) / 4) as u8 }, neg: false, abs: false }
+                    })
+                    .collect())
             }
-            Root::Storage(buffer) => {
+            Root::Uniform(loc) | Root::Storage(loc) => {
                 let offs = self.byte_offsets(&p.ty)?;
-                let idx = match p.dynamic {
-                    Some(Dyn::Dwords(v)) => v,
-                    _ => self.mov(Arg::imm(0)),
-                };
-                self.fetch(buffer, idx, p.off, &offs, true)
+                let swap = matches!(p.root, Root::Storage(_));
+                let buffer = 128 + loc;
+                match p.dynamic {
+                    None => {
+                        let idx = self.mov(Arg::imm(0));
+                        self.fetch(buffer, idx, p.off, &offs, swap)
+                    }
+                    Some(Dyn::Bytes { v, aligned16: true }) => {
+                        let idx = self.iop(op2::LSHR_INT, Arg::v(v), Arg::imm(4));
+                        let idx = self.to_v(idx);
+                        self.fetch(buffer, idx, p.off, &offs, swap)
+                    }
+                    Some(Dyn::Bytes { v, aligned16: false }) => {
+                        // the 16-byte element holding each dword, then the dword inside it
+                        let mut out = Vec::new();
+                        for o in offs {
+                            let t = self.iop(op2::ADD_INT, Arg::v(v), Arg::imm(p.off + o));
+                            let idx = self.iop(op2::LSHR_INT, t, Arg::imm(4));
+                            let idx = self.to_v(idx);
+                            let ch = self.iop(op2::LSHR_INT, t, Arg::imm(2));
+                            let ch = self.iop(op2::AND_INT, ch, Arg::imm(3));
+                            let q = self.fetch(buffer, idx, 0, &[0, 4, 8, 12], swap)?;
+                            let mut r = q[0];
+                            for (c, x) in q.iter().enumerate().skip(1) {
+                                let hit = self.iop(op2::SETE_INT, ch, Arg::imm(c as u32));
+                                r = self.select(hit, *x, r);
+                            }
+                            out.push(r);
+                        }
+                        Ok(out)
+                    }
+                    Some(Dyn::Scalars { .. }) => unreachable!(),
+                }
             }
             Root::Local(..) | Root::Private(_) => {
                 let regs = self.var_regs(&p.root)?;
@@ -739,14 +765,15 @@ impl<'a> Lower<'a> {
                             out.push(r);
                         }
                     }
-                    Some(Dyn::Dwords(_)) => unreachable!(),
+                    Some(Dyn::Bytes { .. }) => unreachable!(),
                 }
                 Ok(out)
             }
         }
     }
 
-    /// Read dwords at `idx * 4 + base + offs[i]` bytes, merging runs of up to four consecutive dwords.
+    /// Read dwords at `idx * 16 + base + offs[i]` bytes (buffers are fetched as 16-byte elements), merging runs
+    /// of up to four consecutive dwords.
     fn fetch(&mut self, buffer: u8, idx: V, base: u32, offs: &[u32], swap: bool) -> R<Vec<Arg>> {
         let mut out = Vec::new();
         let mut i = 0;
@@ -755,9 +782,16 @@ impl<'a> Lower<'a> {
             while n < 4 && i + n < offs.len() && offs[i + n] == offs[i] + 4 * n as u32 {
                 n += 1;
             }
-            let offset = base + offs[i];
-            if offset > 0xFFFF || offset % 4 != 0 {
+            let mut offset = base + offs[i];
+            if offset % 4 != 0 {
                 return unsupported(format!("buffer offset {offset}"));
+            }
+            let mut idx = idx;
+            if offset > 0xFFF0 {
+                // past the offset field: move whole elements into the index
+                let moved = self.iop(op2::ADD_INT, Arg::v(idx), Arg::imm(offset / 16));
+                idx = self.to_v(moved);
+                offset %= 16;
             }
             let mut dst = [None; 4];
             for d in dst.iter_mut().take(n) {
@@ -836,18 +870,18 @@ impl<'a> Lower<'a> {
             if step % 4 != 0 {
                 return unsupported("buffer element stride not a multiple of 4");
             }
-            let dw = step / 4;
-            let scaled = if dw.is_power_of_two() {
-                self.iop(op2::LSHL_INT, idx, Arg::imm(dw.trailing_zeros()))
+            let scaled = if step.is_power_of_two() {
+                self.iop(op2::LSHL_INT, idx, Arg::imm(step.trailing_zeros()))
             } else {
-                self.iop(op2::MULLO_INT, idx, Arg::imm(dw))
+                self.iop(op2::MULLO_INT, idx, Arg::imm(step))
             };
-            let total = match p.dynamic {
-                Some(Dyn::Dwords(v)) => self.iop(op2::ADD_INT, scaled, Arg::v(v)),
-                _ => scaled,
+            let (total, aligned) = match p.dynamic {
+                Some(Dyn::Bytes { v, aligned16 }) => (self.iop(op2::ADD_INT, scaled, Arg::v(v)), aligned16),
+                _ => (scaled, true),
             };
             let v = self.to_v(total);
-            Ok(Ptr { root: p.root.clone(), ty, off: p.off, dynamic: Some(Dyn::Dwords(v)) })
+            let aligned16 = aligned && step % 16 == 0;
+            Ok(Ptr { root: p.root.clone(), ty, off: p.off, dynamic: Some(Dyn::Bytes { v, aligned16 }) })
         } else {
             if p.dynamic.is_some() {
                 return unsupported("two dynamic indices into one local variable");
@@ -888,8 +922,7 @@ impl<'a> Lower<'a> {
             AddressSpace::Uniform => {
                 let b = binding()?;
                 let block = *self.opts.uniform_blocks.get(&b).ok_or(Error::Unbound(b))?;
-                let fetch = self.opts.uniform_fetch.get(&b).copied();
-                Lv::Ptr(Ptr { root: Root::Uniform { block, fetch }, ty, off: 0, dynamic: None })
+                Lv::Ptr(Ptr { root: Root::Uniform(block), ty, off: 0, dynamic: None })
             }
             AddressSpace::Storage { .. } => {
                 let b = binding()?;
