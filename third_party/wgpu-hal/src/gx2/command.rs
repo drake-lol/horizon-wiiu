@@ -139,6 +139,7 @@ impl State {
                 }
                 Cmd::BufferToTexture { src, dst, regions } => {
                     shared.sync();
+                    shared.stats.uploads += 1;
                     if !dst.linear {
                         std::println!("GX2: upload to a render target texture skipped");
                         return;
@@ -192,9 +193,12 @@ impl State {
                     self.in_pass = true;
                     self.dead = *dead;
                     self.pipeline = None;
+                    shared.stats.passes += 1;
                     if *dead {
+                        shared.stats.dead_passes += 1;
                         return;
                     }
+                    shared.stats.clears += colors.iter().filter(|c| c.1.is_some()).count() as u32;
                     // clears first: they overwrite state, which the reset below restores
                     for (cb, clear, _) in colors {
                         if let Some([r, g, b, a]) = clear {
@@ -272,14 +276,22 @@ impl State {
                 }
                 Cmd::BlendConstants([r, g, b, a]) => GX2SetBlendConstantColor(*r, *g, *b, *a),
                 Cmd::Draw { first_vertex, vertex_count, first_instance, instance_count } => {
+                    if self.ready().is_none() {
+                        shared.stats.skipped_draws += 1;
+                    }
                     if let Some(p) = self.ready() {
+                        shared.stats.draws += 1;
                         let p = &*p;
                         self.bind(p);
                         GX2DrawEx2(p.mode, *vertex_count, *first_vertex, *instance_count, *first_instance);
                     }
                 }
                 Cmd::DrawIndexed { first_index, index_count, base_vertex, first_instance, instance_count } => {
+                    if self.ready().is_none() || self.index.is_none() {
+                        shared.stats.skipped_draws += 1;
+                    }
                     if let (Some(p), Some((ptr, wide))) = (self.ready(), self.index) {
+                        shared.stats.draws += 1;
                         let p = &*p;
                         self.bind(p);
                         let (ty, size) = if wide {

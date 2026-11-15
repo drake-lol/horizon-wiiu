@@ -122,6 +122,19 @@ pub struct Shared {
     _context_mem: GpuMem,
     /// GPU work may still be running: wait before the CPU writes memory it could read.
     gpu_busy: bool,
+    /// What the frames did, printed at present while the backend is brought up.
+    pub(crate) stats: Stats,
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub(crate) struct Stats {
+    pub frames: u32,
+    pub passes: u32,
+    pub dead_passes: u32,
+    pub draws: u32,
+    pub skipped_draws: u32,
+    pub clears: u32,
+    pub uploads: u32,
 }
 
 unsafe impl Send for Shared {}
@@ -138,7 +151,7 @@ impl Shared {
         let context = mem.ptr.cast::<GX2ContextState>();
         // SAFETY: zeroed, aligned context state memory.
         unsafe { GX2SetupContextStateEx(context, 1) };
-        Shared { context, _context_mem: mem, gpu_busy: true }
+        Shared { context, _context_mem: mem, gpu_busy: true, stats: Stats::default() }
     }
 
     /// Back to the pass-starting state, in uniform-block shader mode with GPRs split between stages.
@@ -679,6 +692,11 @@ impl crate::Queue for Queue {
             GX2CopyColorBufferToScanBuffer(&*frame.color, GX2ScanTarget_GX2_SCAN_TARGET_DRC);
             // swaps, flushes and waits for the GPU
             WHBGfxFinishRender();
+        }
+        let st = &mut shared.stats;
+        st.frames += 1;
+        if st.frames <= 3 || st.frames % 300 == 0 {
+            std::println!("GX2: frame {} so far {:?}", st.frames, st);
         }
         shared.gpu_busy = false;
         Ok(())
