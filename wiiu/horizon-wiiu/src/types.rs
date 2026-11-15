@@ -10,6 +10,12 @@ pub const TINT_TOP: u8 = 2;
 pub const TINT_FOLIAGE: u8 = 4;
 pub const TINT_WATER: u8 = 8;
 pub const LIQUID: u8 = 16;
+/// A full cube with see-through texels (leaves, glass): drawn, solid to walk on, but it hides no neighbour.
+pub const CUTOUT: u8 = 32;
+/// Two crossed quads (grass, flowers, saplings).
+pub const CROSS: u8 = 64;
+/// Tinted with the grass colour on every face (short grass, ferns).
+pub const TINT_GRASS: u8 = 128;
 
 #[derive(Clone, Copy, Default)]
 pub struct TypeInfo {
@@ -103,6 +109,11 @@ impl Types {
 
     pub fn opaque(&self, t: u16) -> bool {
         t != 0 && self.info(t).flags & OPAQUE != 0
+    }
+
+    /// Blocks the player stands on and cannot walk through.
+    pub fn solid(&self, t: u16) -> bool {
+        t != 0 && self.info(t).flags & (OPAQUE | CUTOUT) != 0
     }
 
     pub fn liquid(&self, t: u16) -> bool {

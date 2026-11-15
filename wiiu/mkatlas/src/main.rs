@@ -5,7 +5,8 @@
 //!   types.bin   "HZTY", u32 BE count, then per type: u16 top, u16 side, u16 bottom (tile ids), u8 flags, u8 0
 //!   states.bin  "HZS2", u32 BE count, then per block state id: u16 BE type id (0 = not drawn)
 //!   hotbar.bin  "HZHB", then nine u16 BE type ids for the hotbar
-//! flags: 1 opaque cube, 2 tint the top (grass), 4 tint all faces (foliage), 8 tint all faces (water), 16 liquid.
+//! flags: 1 opaque cube, 2 tint the top (grass), 4 tint all faces (foliage), 8 tint all faces (water), 16 liquid,
+//! 32 cutout cube (drawn, walkable-solid, does not hide neighbours), 64 cross-shaped plant, 128 tint all faces (grass).
 
 #[path = "../../horizon-wiiu/src/atlas.rs"]
 #[allow(dead_code)]
@@ -35,7 +36,13 @@ struct Atlas {
 
 impl Atlas {
     fn tile(&mut self, name: &str) -> Option<u16> {
-        if let Some(&t) = self.by_name.get(name) {
+        self.tile_alpha(name, false)
+    }
+
+    /// `keep_alpha`: leave see-through pixels see-through (the console shader discards alpha < 0.5).
+    fn tile_alpha(&mut self, name: &str, keep_alpha: bool) -> Option<u16> {
+        let cache = format!("{name}#{keep_alpha}");
+        if let Some(&t) = self.by_name.get(&cache) {
             return Some(t);
         }
         let path = format!("{}/{name}.png", self.dir);
@@ -83,6 +90,10 @@ impl Atlas {
         // no alpha test in the console shader: see-through pixels become a dark version of the tile's own colour
         let fill = if name.contains("leaves") { [28, 66, 14] } else if n > 0 { [(sum[0] / n / 2) as u8, (sum[1] / n / 2) as u8, (sum[2] / n / 2) as u8] } else { [0, 0, 0] };
         for i in 0..TILE * TILE {
+            if keep_alpha {
+                tile[i * 4 + 3] = if tile[i * 4 + 3] < 128 { 0 } else { 255 };
+                continue;
+            }
             if tile[i * 4 + 3] < 128 {
                 tile[i * 4..i * 4 + 3].copy_from_slice(&fill);
             }
@@ -90,12 +101,16 @@ impl Atlas {
         }
         let id = self.tiles.len() as u16;
         self.tiles.push(tile);
-        self.by_name.insert(name.to_string(), id);
+        self.by_name.insert(cache, id);
         Some(id)
     }
 
     fn first(&mut self, names: &[String]) -> Option<u16> {
         names.iter().find_map(|n| self.tile(n))
+    }
+
+    fn first_alpha(&mut self, names: &[String]) -> Option<u16> {
+        names.iter().find_map(|n| self.tile_alpha(n, true))
     }
 }
 
@@ -112,16 +127,63 @@ fn main() {
     let mut by_block: HashMap<String, u16> = HashMap::new();
 
     for id in 0..registry.len() {
-        let name = registry.state(BlockStateId(id as u32)).map(|s| s.name.clone()).unwrap_or_default();
-        let key = name.strip_prefix("minecraft:").unwrap_or(&name).to_string();
+        let state = registry.state(BlockStateId(id as u32));
+        let name = state.map(|s| s.name.clone()).unwrap_or_default();
+        let half = state.and_then(|s| s.properties.iter().find(|(k, _)| k.as_str() == "half").map(|(_, v)| v.clone()));
+        let key0 = name.strip_prefix("minecraft:").unwrap_or(&name).to_string();
+        // two-block plants pick their texture by half; everything else is one type per block
+        let key = match &half {
+            Some(h) if key0.starts_with("tall_") || key0 == "large_fern" || key0 == "sunflower" || key0 == "lilac" || key0 == "rose_bush" || key0 == "peony" => format!("{key0}#{h}"),
+            _ => key0.clone(),
+        };
         if let Some(&t) = by_block.get(&key) {
             states.push(t);
             continue;
         }
-        let n = key.as_str();
+        let n = key0.as_str();
         let s = |x: &str| vec![x.to_string()];
-        let t: u16 = if n == "air" || n == "cave_air" || n == "void_air" || loader::not_a_cube(n) {
+        let mut intern = |k: (u16, u16, u16, u8), types: &mut Vec<(u16, u16, u16, u8)>| -> u16 {
+            let next = types.len() as u16;
+            *type_of.entry(k).or_insert_with(|| {
+                types.push(k);
+                next
+            })
+        };
+        let cross_grass = matches!(n, "short_grass" | "fern" | "tall_grass" | "large_fern");
+        let cross = cross_grass
+            || n.ends_with("_sapling")
+            || n.ends_with("_tulip")
+            || matches!(
+                n,
+                "dandelion" | "poppy" | "blue_orchid" | "allium" | "azure_bluet" | "oxeye_daisy" | "cornflower" | "lily_of_the_valley"
+                    | "wither_rose" | "dead_bush" | "sugar_cane" | "brown_mushroom" | "red_mushroom" | "sunflower" | "lilac"
+                    | "rose_bush" | "peony" | "sweet_berry_bush" | "torchflower" | "pink_petals" | "crimson_roots" | "warped_roots"
+                    | "nether_sprouts" | "crimson_fungus" | "warped_fungus" | "cobweb" | "bush" | "firefly_bush" | "short_dry_grass"
+                    | "tall_dry_grass"
+            );
+        let t: u16 = if cross {
+            let tex = match (n, half.as_deref()) {
+                ("tall_grass" | "large_fern" | "sunflower" | "lilac" | "rose_bush" | "peony", Some("upper")) => vec![format!("{n}_top"), format!("{n}_front")],
+                ("tall_grass" | "large_fern" | "sunflower" | "lilac" | "rose_bush" | "peony", _) => vec![format!("{n}_bottom")],
+                ("sweet_berry_bush", _) => s("sweet_berry_bush_stage3"),
+                _ => vec![n.to_string()],
+            };
+            match atlas.first_alpha(&tex) {
+                Some(a) => intern((a, a, a, 64 | if cross_grass { 128 } else { 0 }), &mut types),
+                None => 0,
+            }
+        } else if n == "air" || n == "cave_air" || n == "void_air" || loader::not_a_cube(n) {
             0
+        } else if n.ends_with("_leaves") {
+            match atlas.first_alpha(&s(n)) {
+                Some(a) => intern((a, a, a, 32 | if n == "cherry_leaves" || n == "azalea_leaves" || n == "flowering_azalea_leaves" { 0 } else { 4 }), &mut types),
+                None => 0,
+            }
+        } else if n == "glass" || n.ends_with("_stained_glass") || n == "tinted_glass" {
+            match atlas.first_alpha(&s(n)) {
+                Some(a) => intern((a, a, a, 32), &mut types),
+                None => 0,
+            }
         } else {
             let (top, side, bottom, flags): (Vec<String>, Vec<String>, Vec<String>, u8) = if n == "water" || n == "bubble_column" {
                 (s("water_still"), s("water_still"), s("water_still"), 8 | 16)
@@ -131,8 +193,6 @@ fn main() {
                 (s("grass_block_top"), s("grass_block_side"), s("dirt"), 1 | 2)
             } else if n == "podzol" || n == "mycelium" {
                 (vec![format!("{n}_top")], vec![format!("{n}_side")], s("dirt"), 1)
-            } else if n.ends_with("_leaves") {
-                (s(n), s(n), s(n), 1 | 4)
             } else if let Some(base) = n.strip_suffix("_wood").map(|b| format!("{b}_log")) {
                 (vec![base.clone()], vec![base.clone()], vec![base], 1)
             } else {
@@ -144,14 +204,7 @@ fn main() {
                 )
             };
             match (atlas.first(&top), atlas.first(&side), atlas.first(&bottom)) {
-                (Some(a), Some(b), Some(c)) => {
-                    let k = (a, b, c, flags);
-                    let next = types.len() as u16;
-                    *type_of.entry(k).or_insert_with(|| {
-                        types.push(k);
-                        next
-                    })
-                }
+                (Some(a), Some(b), Some(c)) => intern((a, b, c, flags), &mut types),
                 _ => 0,
             }
         };

@@ -1,7 +1,7 @@
 //! A small voxel world and its mesher. The terrain here is procedural; a loader for Minecraft region
 //! files replaces `generate` once the engine crates are linked in.
 
-use crate::types::{Types, LIQUID, OPAQUE, TINT_FOLIAGE, TINT_TOP, TINT_WATER};
+use crate::types::{Types, CROSS, CUTOUT, LIQUID, TINT_FOLIAGE, TINT_GRASS, TINT_TOP, TINT_WATER};
 #[allow(unused_imports)]
 use crate::atlas;
 
@@ -215,7 +215,7 @@ impl World {
 
     /// A block the player cannot walk through: a full cube that is not a liquid.
     pub fn solid_at(&self, x: i32, y: i32, z: i32) -> bool {
-        self.types.opaque(self.get(x, y, z))
+        self.types.solid(self.get(x, y, z))
     }
 
     pub fn surface(&self, x: usize, z: usize) -> usize {
@@ -248,10 +248,28 @@ impl World {
                     }
                     let liquid = info.flags & LIQUID != 0;
                     let tint = 0.94 + 0.12 * hash(x * 31 + y, z, 5);
+                    if info.flags & CROSS != 0 {
+                        let k = 0.9 * tint;
+                        let rgb = if info.flags & TINT_GRASS != 0 { [k * 0.57, k * 0.74, k * 0.35] } else { [k, k, k] };
+                        let color = [(rgb[0] * 255.0) as u8, (rgb[1] * 255.0) as u8, (rgb[2] * 255.0) as u8, 255];
+                        let (u0, v0, su, sv) = atlas::uv_rect(info.side as usize);
+                        let (fx, fy, fz) = (x as f32, y as f32, z as f32);
+                        // two diagonal planes, each emitted in both windings so back-face culling keeps one
+                        for (a, b) in [([0.0, 0.0], [1.0, 1.0]), ([1.0, 0.0], [0.0, 1.0])] {
+                            let bl = Vertex { pos: [fx + a[0], fy, fz + a[1], 1.0], color, uv: [u0, v0 + sv] };
+                            let br = Vertex { pos: [fx + b[0], fy, fz + b[1], 1.0], color, uv: [u0 + su, v0 + sv] };
+                            let tr = Vertex { pos: [fx + b[0], fy + 1.0, fz + b[1], 1.0], color, uv: [u0 + su, v0] };
+                            let tl = Vertex { pos: [fx + a[0], fy + 1.0, fz + a[1], 1.0], color, uv: [u0, v0] };
+                            out.extend_from_slice(&[bl, br, tr, tl]);
+                            out.extend_from_slice(&[bl, tl, tr, br]);
+                        }
+                        continue;
+                    }
+                    let cutout = info.flags & CUTOUT != 0;
                     for (n, o, u, v, shade) in FACES.iter() {
                         let nb = self.get(x + n[0], y + n[1], z + n[2]);
                         // hidden behind an opaque block, or inside the same liquid
-                        let visible = nb == 0 || (!self.types.opaque(nb) && !(liquid && self.types.liquid(nb)));
+                        let visible = nb == 0 || (!self.types.opaque(nb) && !(liquid && self.types.liquid(nb)) && !(cutout && nb == b));
                         if !visible {
                             continue;
                         }
@@ -262,7 +280,7 @@ impl World {
                             Some([0.25, 0.46, 0.89])
                         } else if info.flags & TINT_FOLIAGE != 0 {
                             Some([0.47, 0.67, 0.18])
-                        } else if info.flags & TINT_TOP != 0 && n[1] == 1 {
+                        } else if info.flags & TINT_GRASS != 0 || (info.flags & TINT_TOP != 0 && n[1] == 1) {
                             Some([0.57, 0.74, 0.35])
                         } else {
                             None

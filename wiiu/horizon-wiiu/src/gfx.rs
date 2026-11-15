@@ -7,7 +7,7 @@ use core::ffi::c_void;
 use core::mem::{size_of, zeroed};
 use wut_sys::*;
 
-static SHADER: &[u8] = include_bytes!("../assets/tex_mvp.gsh");
+static SHADER: &[u8] = include_bytes!("../assets/tex_cutout.gsh");
 
 const VERTEX_BUFFER_FLAGS: u32 = GX2RResourceFlags_GX2R_RESOURCE_BIND_VERTEX_BUFFER
     | GX2RResourceFlags_GX2R_RESOURCE_USAGE_CPU_READ
