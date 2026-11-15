@@ -69,6 +69,110 @@ fn cr_tests() {
         }
     }
     println!("cr tests done ({bad} bad branch cases)");
+    carry_tests();
+}
+
+/// The carry instructions, with XER.CA in and out, against their PowerPC definitions.
+#[cfg(target_vendor = "wiiu")]
+fn carry_tests() {
+    use core::arch::asm;
+    let vals = [0u32, 1, 2, 0x7FFF_FFFF, 0x8000_0000, 0xFFFF_FFFE, 0xFFFF_FFFF, 0x1234_5678, 0xC176_815D];
+    let mut bad = 0;
+    macro_rules! t2 {
+        ($name:literal, $ins:literal, |$a:ident, $b:ident, $c:ident| $want:expr) => {
+            for &$a in &vals {
+                for &$b in &vals {
+                    for $c in 0..2u32 {
+                        let (d, xer): (u32, u32);
+                        unsafe {
+                            asm!("mtxer {x}", concat!($ins, " {d}, {a}, {b}"), "mfxer {o}",
+                                x = in(reg) $c << 29, a = in(reg) $a, b = in(reg) $b, d = out(reg) d, o = out(reg) xer);
+                        }
+                        let (wd, wc): (u32, u32) = $want;
+                        let gc = (xer >> 29) & 1;
+                        if (d, gc) != (wd, wc) {
+                            if bad < 40 {
+                                println!("CARRY BAD {} a={:#x} b={:#x} ca={}: got {:#x} ca {} want {:#x} ca {}", $name, $a, $b, $c, d, gc, wd, wc);
+                            }
+                            bad += 1;
+                        }
+                    }
+                }
+            }
+        };
+    }
+    macro_rules! t1 {
+        ($name:literal, $ins:literal, |$a:ident, $c:ident| $want:expr) => {
+            for &$a in &vals {
+                for $c in 0..2u32 {
+                    let (d, xer): (u32, u32);
+                    unsafe {
+                        asm!("mtxer {x}", concat!($ins, " {d}, {a}"), "mfxer {o}",
+                            x = in(reg) $c << 29, a = in(reg) $a, d = out(reg) d, o = out(reg) xer);
+                    }
+                    let (wd, wc): (u32, u32) = $want;
+                    let gc = (xer >> 29) & 1;
+                    if (d, gc) != (wd, wc) {
+                        if bad < 40 {
+                            println!("CARRY BAD {} a={:#x} ca={}: got {:#x} ca {} want {:#x} ca {}", $name, $a, $c, d, gc, wd, wc);
+                        }
+                        bad += 1;
+                    }
+                }
+            }
+        };
+    }
+    let add3 = |x: u32, y: u32, c: u32| {
+        let s = x as u64 + y as u64 + c as u64;
+        (s as u32, (s >> 32) as u32)
+    };
+    t2!("addc", "addc", |a, b, c| add3(a, b, 0));
+    t2!("adde", "adde", |a, b, c| add3(a, b, c));
+    t2!("subfc", "subfc", |a, b, c| add3(!a, b, 1));
+    t2!("subfe", "subfe", |a, b, c| add3(!a, b, c));
+    t1!("addze", "addze", |a, c| add3(a, 0, c));
+    t1!("addme", "addme", |a, c| add3(a, 0xFFFF_FFFF, c));
+    t1!("subfze", "subfze", |a, c| add3(!a, 0, c));
+    t1!("subfme", "subfme", |a, c| add3(!a, 0xFFFF_FFFF, c));
+    // the same register twice, as LLVM uses to turn the carry into a mask
+    for &a in &vals {
+        for c in 0..2u32 {
+            let (d, xer): (u32, u32);
+            unsafe {
+                asm!("mtxer {x}", "subfe {d}, {a}, {a}", "mfxer {o}", x = in(reg) c << 29, a = in(reg) a, d = out(reg) d, o = out(reg) xer);
+            }
+            let (wd, wc) = add3(!a, a, c);
+            if (d, (xer >> 29) & 1) != (wd, wc) {
+                println!("CARRY BAD subfe same a={a:#x} ca={c}: got {d:#x} ca {} want {wd:#x} ca {wc}", (xer >> 29) & 1);
+                bad += 1;
+            }
+        }
+    }
+    for &a in &vals {
+        for imm in [0i16, 1, -1, 0x7FFF] {
+            let (d1, x1, d2, x2): (u32, u32, u32, u32);
+            unsafe {
+                match imm {
+                    0 => asm!("mtxer {z}", "subfic {d}, {a}, 0", "mfxer {o}", "mtxer {z}", "addic {e}, {a}, 0", "mfxer {p}", z = in(reg) 0, a = in(reg) a, d = out(reg) d1, o = out(reg) x1, e = out(reg) d2, p = out(reg) x2),
+                    1 => asm!("mtxer {z}", "subfic {d}, {a}, 1", "mfxer {o}", "mtxer {z}", "addic {e}, {a}, 1", "mfxer {p}", z = in(reg) 0, a = in(reg) a, d = out(reg) d1, o = out(reg) x1, e = out(reg) d2, p = out(reg) x2),
+                    -1 => asm!("mtxer {z}", "subfic {d}, {a}, -1", "mfxer {o}", "mtxer {z}", "addic {e}, {a}, -1", "mfxer {p}", z = in(reg) 0, a = in(reg) a, d = out(reg) d1, o = out(reg) x1, e = out(reg) d2, p = out(reg) x2),
+                    _ => asm!("mtxer {z}", "subfic {d}, {a}, 32767", "mfxer {o}", "mtxer {z}", "addic {e}, {a}, 32767", "mfxer {p}", z = in(reg) 0, a = in(reg) a, d = out(reg) d1, o = out(reg) x1, e = out(reg) d2, p = out(reg) x2),
+                }
+            }
+            let im = imm as i32 as u32;
+            let w1 = add3(!a, im, 1);
+            let w2 = add3(a, im, 0);
+            if (d1, (x1 >> 29) & 1) != w1 {
+                println!("CARRY BAD subfic a={a:#x} imm={imm}: got {d1:#x} ca {} want {:?}", (x1 >> 29) & 1, w1);
+                bad += 1;
+            }
+            if (d2, (x2 >> 29) & 1) != w2 {
+                println!("CARRY BAD addic a={a:#x} imm={imm}: got {d2:#x} ca {} want {:?}", (x2 >> 29) & 1, w2);
+                bad += 1;
+            }
+        }
+    }
+    println!("carry tests done ({bad} bad)");
 }
 
 use std::hint::black_box as bb;
