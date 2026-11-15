@@ -19,7 +19,6 @@ use wut_sys::*;
 
 const FOV: f32 = 70.0 * core::f32::consts::PI / 180.0;
 const SKY: [f32; 3] = [0.55, 0.72, 0.95];
-const CHUNKS_X: usize = world::SIZE_X / world::CHUNK;
 
 /// Debug aid: every two seconds report where the main thread was last descheduled (pc, lr, sp), to find a spin.
 fn watchdog() {
@@ -282,8 +281,9 @@ impl Game {
         // a bounded number per frame: a joining client receives hundreds of chunks at once
         let take = self.dirty.len().min(if self.dirty.len() > 40 { 12 } else { 6 });
         let dirty: Vec<usize> = self.dirty.drain(..take).collect();
+        let per_row = self.world.sx / world::CHUNK;
         for i in dirty {
-            let (cx, cz) = (i % CHUNKS_X, i / CHUNKS_X);
+            let (cx, cz) = (i % per_row, i / per_row);
             let verts = self.world.mesh_chunk(cx, cz);
             let fresh = gfx.upload(&verts);
             if fresh.is_none() && !verts.is_empty() {
@@ -458,7 +458,7 @@ fn main() {
         game.frame += 1;
         if game.frame % 120 == 0 {
             let p = &game.player;
-            println!("horizon-wiiu: meshes {} verts_total {} cached {} resent {} forgotten {} loaded {} quiet {}", game.meshes.iter().flatten().count(), game.verts_total, game.cache.len(), game.resent, game.forgotten, net::loaded(), net::chunks_quiet(2000));
+            println!("horizon-wiiu: meshes {} verts_total {} cached {} resent {} forgotten {} loaded {} quiet {} loaded_ms {:?} last_move_ms {} spawned {}", game.meshes.iter().flatten().count(), game.verts_total, game.cache.len(), game.resent, game.forgotten, net::loaded(), net::chunks_quiet(2000), loaded_at.map(|t| t.elapsed().as_millis() as u64), last_move.elapsed().as_millis() as u64, game.spawned);
             println!("horizon-wiiu: frame {} pos ({}, {}, {}) dm ground={} broke={broke} placed={placed}", game.frame, (p.pos[0] * 10.0) as i64, (p.pos[1] * 10.0) as i64, (p.pos[2] * 10.0) as i64, p.on_ground);
         }
     }
